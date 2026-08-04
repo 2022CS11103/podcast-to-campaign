@@ -1,0 +1,10 @@
+google-genai
+python-dotenv
+requests
+youtube-transcript-api
+
+# NEW
+openai-whisper
+ffmpeg-python
+moviepy
+pydub

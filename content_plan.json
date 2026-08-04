@@ -1,0 +1,6 @@
+{
+  "instagram_reels": { "count": 3, "interval_days": 2 },
+  "youtube_shorts": { "count": 2, "interval_days": 3 },
+  "linkedin": { "count": 2, "interval_days": 7 },
+  "twitter": { "count": 1, "interval_days": 4 }
+}

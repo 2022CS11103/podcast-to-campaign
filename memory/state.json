@@ -1,0 +1,14 @@
+{
+    "video_path": "input/video.mp4",
+    "audio_path": "output/audio.wav",
+    "metadata_path": "output/metadata.json",
+    "transcript_path": "output/transcript.json",
+    "clean_transcript_path": "output/clean_transcript.json",
+    "chunks_path": "output/chunks.json",
+    "analysis_path": "output/analysis.json",
+    "clips_path": "output/clips.json",
+    "shorts_folder": "output/final_shorts",
+    "editing_completed": true,
+    "marketing_folder": "output",
+    "marketing_completed": true
+}
