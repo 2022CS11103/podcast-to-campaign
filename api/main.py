@@ -90,7 +90,18 @@ def download_campaign(job_id: str):
         zip_path,
         media_type="application/zip",
         filename=f"campaign_{job_id[:8]}.zip"
+
+
     )
+
+@app.get("/strategy-brief")
+def get_strategy_brief():
+    brief_file = PROJECT_ROOT / "output" / "strategy_brief.txt"
+    if not brief_file.exists():
+        raise HTTPException(status_code=404, detail="Strategy brief not found")
+    with open(brief_file, "r", encoding="utf-8") as f:
+        return {"strategy_brief": f.read()}
+    
 
 @app.post("/mark-posted/{clip_id}")
 def mark_posted(clip_id: str):

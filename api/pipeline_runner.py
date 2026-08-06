@@ -20,6 +20,21 @@ def _worker():
         try:
             reset_log()
 
+            if brand_context:
+                brand_file = PROJECT_ROOT / "brand_context.json"
+                with open(brand_file, "w", encoding="utf-8") as f:
+                    json.dump(brand_context, f, indent=2)
+
+            job_manager.update(job_id, step="strategy")
+            subprocess.run(
+                [sys.executable, "scripts/ai/strategy_agent.py"],
+                check=True,
+                cwd=str(PROJECT_ROOT)
+            )
+
+            job_manager.update(job_id, status="running", step="video")
+
+
             if content_plan:
                 plan_file = PROJECT_ROOT / "content_plan.json"
                 with open(plan_file, "w", encoding="utf-8") as f:
@@ -41,6 +56,14 @@ def _worker():
 
             job_manager.update(job_id, step="highlight")
             creator.highlight.run()
+
+            job_manager.update(job_id, step="trimming")
+            subprocess.run(
+                [sys.executable, "scripts/ai/trim_clips.py"],
+                check=True,
+                cwd=str(PROJECT_ROOT)
+            )
+
 
             job_manager.update(job_id, step="editing")
             creator.editor.run()
@@ -85,8 +108,9 @@ def _worker():
                 "content_bank": str(PROJECT_ROOT / "output" / "content_bank.json"),
                 "campaign_calendar": str(PROJECT_ROOT / "output" / "campaign_calendar.md"),
                 "campaign_summary": str(PROJECT_ROOT / "output" / "campaign_summary.json"),
-                "cost_report": cost_report,
+                "strategy_brief": str(PROJECT_ROOT / "output" / "strategy_brief.txt"),
                 "campaign_zip": zip_path,
+                "cost_report": cost_report,
             }
 
             job_manager.update(job_id, status="completed", step="done", result=result)

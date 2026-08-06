@@ -26,6 +26,24 @@ PLATFORM_SCORE_WEIGHTS = {
 }
 
 
+ANGLE_LABELS = {
+    "hook": "Attention-Grabbing",
+    "education": "Educational",
+    "emotion": "Emotional / Story",
+    "curiosity": "Curiosity-Driven",
+    "shareability": "Highly Shareable",
+}
+
+
+def get_content_angle(clip):
+    """Sabse dominant score dimension se ek human-readable content angle nikalta hai."""
+    scores = clip.get("scores", {}) or {}
+    if not scores:
+        return "General"
+    top_dimension = max(scores, key=scores.get)
+    return ANGLE_LABELS.get(top_dimension, "General")
+
+
 def platform_fit_score(clip, platform):
     scores = clip.get("scores", {}) or {}
     weights = PLATFORM_SCORE_WEIGHTS.get(platform, {})
@@ -81,6 +99,7 @@ def main():
                 "video_file": str(shorts_dir / video_filename),
                 "hook": clip.get("hook", ""),
                 "summary": clip.get("summary", ""),
+                "content_angle": get_content_angle(clip),
                 "overall_score": clip.get("overall_score", 0),
                 "platform_fit_score": round(platform_fit_score(clip, platform), 2),
                 "duration_seconds": duration,
@@ -89,6 +108,7 @@ def main():
                 "scheduled_date": scheduled_date.strftime("%Y-%m-%d"),
                 "status": "pending",
             })
+            
             used_ids.add(clip.get("chunk_id"))
             item_counter += 1
 

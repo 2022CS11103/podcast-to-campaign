@@ -23,6 +23,8 @@ def main():
         platform_label = item["assigned_platform"].replace("_", " ").title()
         lines.append(f"## {item['scheduled_date']} — {platform_label}")
         lines.append(f"**Hook:** {item['hook']}")
+        lines.append(f"**Content Angle:** {item.get('content_angle', 'General')}")
+        lines.append(f"**Hook:** {item['hook']}")
         lines.append(f"**Why this clip:** Fit score {item['platform_fit_score']}/10 for {platform_label} — selected for its strength in this platform's key drivers.")
         lines.append(f"**Duration:** {item['duration_seconds']}s")
         lines.append("")
