@@ -10,12 +10,23 @@ while ($true) {
 
         $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
-        git commit -m "Auto update $time"
+        git commit -m "autosave: $time"
 
         git push origin main
 
-        Write-Host "✅ Pushed at $time"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "⚠️ Remote changed. Syncing..."
+            git pull --rebase origin main
+
+            if ($LASTEXITCODE -eq 0) {
+                git push origin main
+            }
+        }
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ GitHub updated at $time"
+        }
     }
 
-    Start-Sleep -Seconds 10
+    Start-Sleep -Seconds 30
 }
