@@ -3,12 +3,14 @@ import threading
 import subprocess
 import sys
 import json
+import time
 from pathlib import Path
 import shutil
 from agents.orchestrator import CreatorOS
 from api.job_manager import job_manager
 from utils.cost_tracker import generate_report, reset_log
-from utils.content_plan import plan_is_usable
+from utils.content_plan import plan_is_usable, normalize_plan
+from utils.pipeline_timer import reset as reset_timer, log_step, finish, snapshot, format_duration
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -16,11 +18,36 @@ task_queue = queue.Queue()
 
 
 def _run_script(script: str):
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, script],
-        check=True,
         cwd=str(PROJECT_ROOT),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
+    if result.stdout:
+        print(result.stdout)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"{script} failed:\n{detail[-2500:]}")
+
+
+def _timed(job_id, name, fn):
+    job_manager.update(job_id, step=name, timing=snapshot())
+    print(f"\n⏱  {name} started")
+    t0 = time.time()
+    ok = True
+    try:
+        return fn()
+    except Exception:
+        ok = False
+        raise
+    finally:
+        elapsed = time.time() - t0
+        timing = log_step(name, elapsed, ok=ok)
+        print(f"⏱  {name} finished in {format_duration(elapsed)}")
+        job_manager.update(job_id, timing=timing)
 
 
 def _worker():
@@ -28,6 +55,8 @@ def _worker():
         job_id, source, content_plan, brand_context = task_queue.get()
         try:
             reset_log()
+            reset_timer()
+            job_manager.update(job_id, started_at=time.time(), timing=snapshot())
 
             # Clean leftover files from the previous run so this job
             # only ever sees clips it generated itself.
@@ -52,7 +81,7 @@ def _worker():
                 with open(brand_file, "w", encoding="utf-8") as f:
                     json.dump(brand_context, f, indent=2)
 
-            content_plan = content_plan or {}
+            content_plan = normalize_plan(content_plan or {})
             content_plan_file = PROJECT_ROOT / "content_plan.json"
             with open(content_plan_file, "w", encoding="utf-8") as f:
                 json.dump(content_plan, f, indent=2)
@@ -60,49 +89,34 @@ def _worker():
             creator = CreatorOS()
 
             job_manager.update(job_id, status="running", step="video")
-            creator.video.run(source)
+            _timed(job_id, "video", lambda: creator.video.run(source))
+            _timed(job_id, "transcript", creator.transcript.run)
+            _timed(job_id, "highlight", creator.highlight.run)
+            _timed(job_id, "strategy", lambda: _run_script("scripts/ai/strategy_agent.py"))
+            _timed(job_id, "ranking", lambda: _run_script("scripts/ai/clip_ranker.py"))
+            _timed(job_id, "editing", creator.editor.run)
+            _timed(job_id, "routing", lambda: _run_script("scripts/ai/platform_router.py"))
+            _timed(job_id, "marketing", creator.marketing.run)
+            _timed(job_id, "planning", lambda: (
+                _run_script("scripts/ai/campaign_planner.py"),
+                _run_script("scripts/ai/campaign_summary.py"),
+                _run_script("scripts/ai/package_manifest.py"),
+            ))
 
-            job_manager.update(job_id, step="transcript")
-            creator.transcript.run()
+            def _package():
+                for old_zip in (PROJECT_ROOT / "output").glob("campaign_*.zip"):
+                    old_zip.unlink()
+                tmp_zip_base = PROJECT_ROOT / f"campaign_{job_id[:8]}"
+                shutil.make_archive(str(tmp_zip_base), "zip", str(PROJECT_ROOT / "output"))
+                final_zip_path = PROJECT_ROOT / "output" / f"campaign_{job_id[:8]}.zip"
+                shutil.move(str(tmp_zip_base) + ".zip", str(final_zip_path))
+                return str(final_zip_path)
 
-            # Score every candidate window. Do not rank yet — we need
-            # the campaign plan first so we only render what we'll post.
-            job_manager.update(job_id, step="highlight")
-            creator.highlight.run()
+            zip_path = _timed(job_id, "packaging", _package)
 
-            job_manager.update(job_id, step="strategy")
-            _run_script("scripts/ai/strategy_agent.py")
-
-            job_manager.update(job_id, step="ranking")
-            _run_script("scripts/ai/clip_ranker.py")
-
-            job_manager.update(job_id, step="editing")
-            creator.editor.run()
-
-            job_manager.update(job_id, step="routing")
-            _run_script("scripts/ai/platform_router.py")
-
-            # Marketing runs AFTER routing so each post is written for
-            # the platform it was assigned, plus one SEO blog + newsletter.
-            job_manager.update(job_id, step="marketing")
-            creator.marketing.run()
-
-            job_manager.update(job_id, step="planning")
-            _run_script("scripts/ai/campaign_planner.py")
+            timing = finish(ok=True)
             _run_script("scripts/ai/campaign_summary.py")
             _run_script("scripts/ai/package_manifest.py")
-
-            job_manager.update(job_id, step="packaging")
-            for old_zip in (PROJECT_ROOT / "output").glob("campaign_*.zip"):
-                old_zip.unlink()
-
-            tmp_zip_base = PROJECT_ROOT / f"campaign_{job_id[:8]}"
-            shutil.make_archive(str(tmp_zip_base), "zip", str(PROJECT_ROOT / "output"))
-
-            final_zip_path = PROJECT_ROOT / "output" / f"campaign_{job_id[:8]}.zip"
-            shutil.move(str(tmp_zip_base) + ".zip", str(final_zip_path))
-            zip_path = str(final_zip_path)
-
             cost_report = generate_report()
 
             result = {
@@ -114,15 +128,37 @@ def _worker():
                 "campaign_summary": str(PROJECT_ROOT / "output" / "campaign_summary.json"),
                 "strategy_brief": str(PROJECT_ROOT / "output" / "strategy_brief.txt"),
                 "package_manifest": str(PROJECT_ROOT / "output" / "package_manifest.json"),
+                "timing_report": str(PROJECT_ROOT / "output" / "timing_report.json"),
                 "campaign_zip": zip_path,
                 "cost_report": cost_report,
+                "timing": timing,
+                "elapsed_seconds": timing["total_seconds"],
+                "elapsed_human": timing["total_human"],
                 "plan_locked": plan_is_usable(content_plan),
             }
 
-            job_manager.update(job_id, status="completed", step="done", result=result)
+            print(f"\n⏱  CAMPAIGN TOTAL: {timing['total_human']}")
+            for step in timing["steps"]:
+                print(f"    {step['step']}: {step['human']}")
+
+            job_manager.update(
+                job_id,
+                status="completed",
+                step="done",
+                result=result,
+                timing=timing,
+                finished_at=time.time(),
+            )
 
         except Exception as e:
-            job_manager.update(job_id, status="failed", error=str(e))
+            timing = finish(ok=False)
+            job_manager.update(
+                job_id,
+                status="failed",
+                error=str(e),
+                timing=timing,
+                finished_at=time.time(),
+            )
         finally:
             task_queue.task_done()
 

@@ -1,5 +1,6 @@
 import os
 import itertools
+from threading import Lock
 from dotenv import load_dotenv
 from google import genai
 
@@ -25,9 +26,11 @@ if not _keys:
     raise RuntimeError("No Gemini API keys found in .env")
 
 _key_cycle = itertools.cycle(_keys)
+_key_lock = Lock()
 
 
 def get_client():
     """Returns a fresh client using the next key in rotation."""
-    key = next(_key_cycle)
+    with _key_lock:
+        key = next(_key_cycle)
     return genai.Client(api_key=key)

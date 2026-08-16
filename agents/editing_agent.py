@@ -17,74 +17,27 @@ class EditingAgent(BaseAgent):
 
         self.log("Starting video editing...")
 
-        # Get video path from shared memory
         video_path = self.memory.get("video_path")
 
         if video_path is None:
             raise ValueError("video_path not found in memory.")
 
-        # Cut top clips
+        # Captions from the cheap transcript (segment timestamps).
         subprocess.run(
-            [
-                PYTHON,
-                "scripts/video/video_cutter.py",
-                video_path
-            ],
+            [PYTHON, "scripts/video/subtitle_generator.py"],
             cwd=PROJECT_ROOT,
-            check=True
+            check=True,
         )
 
-        # Detect speaker
+        # One FFmpeg pass per winning clip. No YOLO, no triple re-encode.
         subprocess.run(
-            [
-                PYTHON,
-                "scripts/video/face_tracker.py"
-            ],
+            [PYTHON, "scripts/video/render_shorts.py", video_path],
             cwd=PROJECT_ROOT,
-            check=True
+            check=True,
         )
 
-        # Smart crop
-        subprocess.run(
-            [
-                PYTHON,
-                "scripts/video/smart_crop.py"
-            ],
-            cwd=PROJECT_ROOT,
-            check=True
-        )
-
-        # Generate subtitles
-        subprocess.run(
-            [
-                PYTHON,
-                "scripts/video/subtitle_generator.py"
-            ],
-            cwd=PROJECT_ROOT,
-            check=True
-        )
-
-        # Burn subtitles
-        subprocess.run(
-            [
-                PYTHON,
-                "scripts/video/subtitle_burner.py"
-            ],
-            cwd=PROJECT_ROOT,
-            check=True
-        )
-
-        # Update memory
-        self.memory.update(
-            "shorts_folder",
-            "output/final_shorts"
-        )
-
-        self.memory.update(
-            "editing_completed",
-            True
-        )
-
+        self.memory.update("shorts_folder", "output/final_shorts")
+        self.memory.update("editing_completed", True)
         self.log("Video editing completed.")
 
         return "output/final_shorts"

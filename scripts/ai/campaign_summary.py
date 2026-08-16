@@ -42,6 +42,12 @@ def main():
         d_max = datetime.strptime(max(dates), "%Y-%m-%d")
         campaign_span_days = (d_max - d_min).days
 
+    timing = {}
+    timing_file = output_dir / "timing_report.json"
+    if timing_file.exists():
+        with open(timing_file, "r", encoding="utf-8") as f:
+            timing = json.load(f)
+
     summary = {
         "brand_name": brand.get("brand_name", "N/A"),
         "campaign_goal": brand.get("goal", "N/A"),
@@ -57,6 +63,9 @@ def main():
         "estimated_cost_usd": cost_report.get("estimated_cost_usd", 0),
         "total_ai_calls": cost_report.get("total_gemini_calls", 0),
         "whisper_processing_seconds": cost_report.get("whisper_processing_seconds", 0),
+        "processing_seconds": timing.get("total_seconds", 0),
+        "processing_human": timing.get("total_human", "0s"),
+        "step_timings": timing.get("steps", []),
         "unit_economics": cost_report.get("unit_economics"),
     }
 
@@ -75,6 +84,11 @@ def main():
     lines.append(f"- SEO pillar blog: {'yes' if summary['pillar_blog'] else 'no'}")
     lines.append(f"- Newsletter: {'yes' if summary['newsletter'] else 'no'}")
     lines.append(f"- A/B variants: {summary['ab_variants_per_clip']} hooks per clip\n")
+    lines.append(f"## Timing")
+    lines.append(f"- **Total campaign time:** {summary['processing_human']}")
+    for step in summary.get("step_timings") or []:
+        lines.append(f"  - {step.get('step')}: {step.get('human')}")
+    lines.append("")
     lines.append(f"## Cost")
     lines.append(f"- Estimated cost: ₹{summary['estimated_cost_inr']} (${summary['estimated_cost_usd']})")
     lines.append(f"- AI calls used: {summary['total_ai_calls']}")

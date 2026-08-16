@@ -2,6 +2,13 @@ google-genai
 python-dotenv
 requests
 youtube-transcript-api
+fastapi
+uvicorn[standard]
+python-multipart
+yt-dlp
+faster-whisper
+opencv-python
+ultralytics<8.4
 
 # NEW
 openai-whisper

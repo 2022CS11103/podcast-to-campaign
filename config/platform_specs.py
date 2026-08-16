@@ -20,8 +20,8 @@ PLATFORM_SPECS = {
     "youtube_shorts": {
         "label": "YouTube Shorts",
         "format": "vertical_video",
-        "min_seconds": 15,
-        "ideal_seconds": 35,
+        "min_seconds": 30,
+        "ideal_seconds": 45,
         "max_seconds": 60,
         "hook_seconds": 3,
         "why": "Retention drops after ~40s unless the payoff is a tutorial. Hook must land before the 3s replay button.",
@@ -30,8 +30,8 @@ PLATFORM_SPECS = {
     "instagram_reels": {
         "label": "Instagram Reels",
         "format": "vertical_video",
-        "min_seconds": 12,
-        "ideal_seconds": 22,
+        "min_seconds": 15,
+        "ideal_seconds": 30,
         "max_seconds": 45,
         "hook_seconds": 2,
         "why": "Reels distribution favors 15–30s. Longer only if the clip is a tight educational framework.",
@@ -50,18 +50,18 @@ PLATFORM_SPECS = {
     "linkedin": {
         "label": "LinkedIn",
         "format": "text_post",
-        "min_words": 80,
-        "ideal_words": 160,
-        "max_words": 220,
+        "min_words": 500,
+        "ideal_words": 800,
+        "max_words": 1200,
         "why": "Thought-leadership posts in the 120–200 word range get more dwell time than dump-and-hashtag.",
         "posting_cadence_days": 7,
     },
     "twitter": {
         "label": "X / Twitter",
         "format": "thread",
-        "min_tweets": 4,
-        "ideal_tweets": 6,
-        "max_tweets": 8,
+        "min_tweets": 5,
+        "ideal_tweets": 8,
+        "max_tweets": 15,
         "why": "A 5–7 tweet thread from one insight outperforms a single clip dump. Lead tweet is the hook.",
         "posting_cadence_days": 4,
     },
@@ -91,7 +91,7 @@ CANDIDATE_TARGET_SECONDS = (20, 35, 50)
 CANDIDATE_MIN_SECONDS = 12
 CANDIDATE_MAX_SECONDS = 60
 # Hard cap on Gemini analysis calls per job (cost control).
-MAX_ANALYZED_CANDIDATES = 24
+MAX_ANALYZED_CANDIDATES = 12
 
 # A/B: three hook/caption variants per clip. Variant A ships first;
 # B/C are held for tests or used if A underperforms.

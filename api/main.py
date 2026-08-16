@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import json
+import time
 from pathlib import Path
 from api.schemas import (
     ProcessRequest,
@@ -9,21 +10,28 @@ from api.schemas import (
     StatusResponse,
     PerformanceRequest,
     RepostRequest,
+    RecommendPlanRequest,
 )
 from api.job_manager import job_manager
 from api.pipeline_runner import start_worker, enqueue_job
 import sys
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 from scripts.ai.quick_recommend import recommend
-from scripts.ai.ab_engine import record_performance, list_winners, schedule_repost
+from scripts.ai.ab_engine import (
+    record_performance as save_performance,
+    list_winners,
+    schedule_repost,
+)
 from config.platform_specs import PLATFORM_SPECS, CANDIDATE_TARGET_SECONDS
+from utils.pipeline_timer import format_duration, snapshot as timing_snapshot
 
 app = FastAPI(title="CreatorOS API")
 
+# Lovable (browser) + ngrok: wildcard origin cannot be used with credentials.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -31,10 +39,63 @@ app.add_middleware(
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONTENT_BANK = PROJECT_ROOT / "output" / "content_bank.json"
 
+DISCONNECTED_ACCOUNTS = [
+    {"platform": "youtube", "label": "YouTube", "status": "not_connected", "connected": False},
+    {"platform": "instagram", "label": "Instagram", "status": "not_connected", "connected": False},
+    {"platform": "linkedin", "label": "LinkedIn", "status": "not_connected", "connected": False},
+    {"platform": "twitter", "label": "Twitter/X", "status": "not_connected", "connected": False},
+]
+
 
 @app.on_event("startup")
 def startup_event():
     start_worker()
+
+
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "creatoros"}
+
+
+@app.get("/health")
+def health():
+    return JSONResponse({"status": "ok"})
+
+
+def _accounts_payload():
+    return {
+        "accounts": DISCONNECTED_ACCOUNTS,
+        "connected": False,
+        "can_skip": True,
+        "message": "No accounts linked. Skip and generate a downloadable campaign package.",
+    }
+
+
+@app.get("/connected-accounts")
+@app.get("/accounts")
+@app.get("/integrations")
+@app.get("/oauth/status")
+@app.get("/auth/connections")
+def connected_accounts():
+    return _accounts_payload()
+
+
+@app.post("/connect/skip")
+@app.post("/oauth/skip")
+def skip_connect():
+    return {"status": "skipped", "can_continue": True, **_accounts_payload()}
+
+
+@app.get("/connect/{platform}")
+@app.post("/connect/{platform}")
+def connect_stub(platform: str):
+    return {
+        "status": "not_connected",
+        "platform": platform,
+        "connected": False,
+        "can_skip": True,
+        "message": "OAuth is not enabled yet. Skip and continue — Generate works with zero accounts.",
+    }
 
 
 @app.post("/process", response_model=ProcessResponse)
@@ -49,23 +110,35 @@ def get_status(job_id: str):
     job = job_manager.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    started = job.get("started_at")
+    finished = job.get("finished_at")
+    if started:
+        elapsed = (finished or time.time()) - started
+    else:
+        elapsed = 0.0
+    timing = job.get("timing") or (job.get("result") or {}).get("timing")
+    if job["status"] == "running":
+        live = timing_snapshot()
+        if live.get("steps"):
+            timing = live
+            elapsed = live.get("total_seconds") or elapsed
+
     return StatusResponse(
         job_id=job["job_id"],
         status=job["status"],
         step=job["step"],
         error=job["error"],
         result=job["result"],
+        elapsed_seconds=round(elapsed, 2) if elapsed else 0,
+        elapsed_human=format_duration(elapsed) if elapsed else "0s",
+        timing=timing,
     )
 
 
 @app.get("/jobs")
 def list_jobs():
     return job_manager.list_jobs()
-
-
-@app.get("/health")
-def health():
-    return JSONResponse({"status": "ok"})
 
 
 @app.get("/next-scheduled-post")
@@ -91,6 +164,15 @@ def get_campaign_summary():
     if not summary_file.exists():
         raise HTTPException(status_code=404, detail="Campaign summary not found")
     with open(summary_file, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@app.get("/timing")
+def get_timing():
+    timing_file = PROJECT_ROOT / "output" / "timing_report.json"
+    if not timing_file.exists():
+        raise HTTPException(status_code=404, detail="Timing report not found")
+    with open(timing_file, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -143,10 +225,11 @@ def mark_posted(clip_id: str):
 
     return {"status": "updated", "id": clip_id}
 
+
 @app.post("/recommend-plan")
-def recommend_plan(brand_context: dict):
+def recommend_plan(req: RecommendPlanRequest):
     try:
-        plan = recommend(brand_context)
+        plan = recommend(req.as_brand_context())
         return {"content_plan": plan}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -154,10 +237,15 @@ def recommend_plan(brand_context: dict):
 
 @app.get("/platform-specs")
 def platform_specs():
-    """Duration, cadence, and format rules the selector uses."""
     return {
         "platforms": PLATFORM_SPECS,
         "candidate_target_seconds": list(CANDIDATE_TARGET_SECONDS),
+        "suggested_lengths": {
+            "instagram_reels": "15-45s",
+            "youtube_shorts": "30-60s",
+            "linkedin": "500-1200 words",
+            "twitter": "5-15 tweets",
+        },
     }
 
 
@@ -171,11 +259,11 @@ def package_manifest():
 
 
 @app.post("/performance/{item_id}")
-def record_performance(item_id: str, req: PerformanceRequest):
+def record_clip_performance(item_id: str, req: PerformanceRequest):
     try:
         metrics = req.model_dump(exclude_none=True) if hasattr(req, "model_dump") else req.dict(exclude_none=True)
         variant_id = metrics.pop("variant_id", None)
-        item = record_performance(item_id, metrics, variant_id=variant_id)
+        item = save_performance(item_id, metrics, variant_id=variant_id)
         return {"status": "updated", "item": item}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Content bank not found")

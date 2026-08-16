@@ -1,5 +1,6 @@
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -33,8 +34,8 @@ Rules:
 - Caption must match the platform:
   - instagram_reels / tiktok: 80-130 words, line breaks, 8 hashtags at end
   - youtube_shorts: Title / Description / Tags format
-  - linkedin: 120-200 words, professional, max 3 hashtags
-  - twitter: 5-7 tweet thread, numbered, lead tweet is the hook
+  - linkedin: 500-1200 words, professional, max 3 hashtags
+  - twitter: 5-15 tweet thread, numbered, lead tweet is the hook
 - Do not mention A/B testing in the copy.
 
 Platform: {platform}
@@ -174,9 +175,20 @@ def main():
     if bank and bank.get("items"):
         posts_dir = output_dir / "posts"
         posts_dir.mkdir(exist_ok=True)
-        for item in bank["items"]:
+
+        def _variants_for(item):
             print(f"Generating A/B variants for {item['id']} ({item['assigned_platform']})...")
-            variants = generate_item_variants(item, clip_lookup, brand)
+            return item["id"], generate_item_variants(item, clip_lookup, brand)
+
+        variant_map = {}
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            futs = [pool.submit(_variants_for, item) for item in bank["items"]]
+            for fut in as_completed(futs):
+                item_id, variants = fut.result()
+                variant_map[item_id] = variants
+
+        for item in bank["items"]:
+            variants = variant_map[item["id"]]
             item["variants"] = variants
             item["active_variant"] = "A"
             item["performance"] = item.get("performance") or {

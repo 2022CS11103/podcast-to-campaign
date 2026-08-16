@@ -1,5 +1,11 @@
 from abc import ABC, abstractmethod
+import subprocess
+import sys
+from pathlib import Path
 from memory.memory_manager import MemoryManager
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PYTHON = sys.executable
 
 
 class BaseAgent(ABC):
@@ -13,3 +19,19 @@ class BaseAgent(ABC):
 
     def log(self, message):
         print(f"[{self.__class__.__name__}] {message}")
+
+    def run_script(self, *args):
+        result = subprocess.run(
+            [PYTHON, *args],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.stdout:
+            print(result.stdout)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(f"{args[0]} failed:\n{detail[-2500:]}")
+        return result

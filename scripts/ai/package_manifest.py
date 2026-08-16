@@ -27,6 +27,12 @@ def main():
         with open(cost_file, "r", encoding="utf-8") as f:
             cost = json.load(f)
 
+    timing = {}
+    timing_file = OUTPUT / "timing_report.json"
+    if timing_file.exists():
+        with open(timing_file, "r", encoding="utf-8") as f:
+            timing = json.load(f)
+
     videos = []
     for folder in ("final_shorts", "youtube_shorts", "instagram_reels", "tiktok"):
         d = OUTPUT / folder
@@ -51,6 +57,7 @@ def main():
             "content_bank": exists("content_bank.json"),
             "campaign_summary": exists("campaign_summary.json"),
             "cost_report": exists("cost_report.json"),
+            "timing_report": exists("timing_report.json"),
         },
         "schedule": [
             {
@@ -69,6 +76,8 @@ def main():
             "video_renders": bank.get("video_renders"),
             "estimated_cost_usd": cost.get("estimated_cost_usd"),
             "estimated_cost_inr": cost.get("estimated_cost_inr"),
+            "processing_seconds": timing.get("total_seconds"),
+            "processing_human": timing.get("total_human"),
         },
         "how_to_use": [
             "Post the scheduled items in calendar order.",

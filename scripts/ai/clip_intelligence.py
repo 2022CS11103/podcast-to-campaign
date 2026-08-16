@@ -1,5 +1,6 @@
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -82,6 +83,31 @@ def parse_analysis(raw):
         }
 
 
+def score_chunk(chunk):
+    duration = chunk.get("duration_seconds")
+    if duration is None:
+        duration = round(float(chunk.get("end", 0)) - float(chunk.get("start", 0)), 2)
+
+    platforms = chunk.get("fits_platforms") or platforms_for_duration(duration)
+    raw = analyze_chunk(chunk["text"], duration, platforms)
+    analysis = parse_analysis(raw)
+
+    if analysis.get("starts_mid_thought"):
+        analysis["overall_score"] = max(0, int(analysis.get("overall_score", 0)) - 20)
+    if analysis.get("payoff_arrives") is False:
+        analysis["overall_score"] = max(0, int(analysis.get("overall_score", 0)) - 15)
+
+    analysis["start"] = chunk["start"]
+    analysis["end"] = chunk["end"]
+    analysis["chunk_id"] = chunk["chunk_id"]
+    analysis["word_count"] = chunk["word_count"]
+    analysis["duration_seconds"] = duration
+    analysis["target_duration"] = chunk.get("target_duration")
+    analysis["fits_platforms"] = platforms
+    analysis["text"] = chunk["text"]
+    return analysis
+
+
 def main():
 
     input_file = PROJECT_ROOT / "output" / "chunks.json"
@@ -92,36 +118,16 @@ def main():
     with open(input_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    results = []
+    chunks = data["chunks"]
+    print(f"Analyzing {len(chunks)} windows in parallel...")
 
-    for chunk in data["chunks"]:
-
-        print(f"Analyzing Chunk {chunk['chunk_id']} ({chunk.get('duration_seconds', '?')}s)...")
-
-        duration = chunk.get("duration_seconds")
-        if duration is None:
-            duration = round(float(chunk.get("end", 0)) - float(chunk.get("start", 0)), 2)
-
-        platforms = chunk.get("fits_platforms") or platforms_for_duration(duration)
-        raw = analyze_chunk(chunk["text"], duration, platforms)
-        analysis = parse_analysis(raw)
-
-        # Penalize incomplete thoughts so they rarely survive ranking.
-        if analysis.get("starts_mid_thought"):
-            analysis["overall_score"] = max(0, int(analysis.get("overall_score", 0)) - 20)
-        if analysis.get("payoff_arrives") is False:
-            analysis["overall_score"] = max(0, int(analysis.get("overall_score", 0)) - 15)
-
-        analysis["start"] = chunk["start"]
-        analysis["end"] = chunk["end"]
-        analysis["chunk_id"] = chunk["chunk_id"]
-        analysis["word_count"] = chunk["word_count"]
-        analysis["duration_seconds"] = duration
-        analysis["target_duration"] = chunk.get("target_duration")
-        analysis["fits_platforms"] = platforms
-        analysis["text"] = chunk["text"]
-
-        results.append(analysis)
+    results = [None] * len(chunks)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        future_map = {pool.submit(score_chunk, chunk): i for i, chunk in enumerate(chunks)}
+        for future in as_completed(future_map):
+            i = future_map[future]
+            results[i] = future.result()
+            print(f"  scored chunk {chunks[i]['chunk_id']}")
 
     output = {
         "results": results
