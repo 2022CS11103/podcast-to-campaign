@@ -71,12 +71,20 @@ def process_video(video_path):
 
     detections = []
 
+    # YOLO on every frame of a 30s clip is the slowest/costliest local step.
+    # Every 5th frame (~6 fps at 30fps) is enough to follow a talking head.
+    STRIDE = 5
+
     while True:
 
         success, frame = cap.read()
 
         if not success:
             break
+
+        if frame_number % STRIDE != 0:
+            frame_number += 1
+            continue
 
         person = detect_main_person(frame)
 

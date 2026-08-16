@@ -1,23 +1,48 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 import json
 from pathlib import Path
-from api.schemas import ProcessRequest, ProcessResponse, StatusResponse
+from api.schemas import (
+    ProcessRequest,
+    ProcessResponse,
+    StatusResponse,
+    PerformanceRequest,
+    RepostRequest,
+)
 from api.job_manager import job_manager
 from api.pipeline_runner import start_worker, enqueue_job
-from fastapi.responses import FileResponse
+import sys
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+from scripts.ai.quick_recommend import recommend
+from scripts.ai.ab_engine import record_performance, list_winners, schedule_repost
+from config.platform_specs import PLATFORM_SPECS, CANDIDATE_TARGET_SECONDS
 
 app = FastAPI(title="CreatorOS API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CONTENT_BANK = PROJECT_ROOT / "output" / "content_bank.json"
+
 
 @app.on_event("startup")
 def startup_event():
     start_worker()
 
+
 @app.post("/process", response_model=ProcessResponse)
 def process_video(req: ProcessRequest):
     job_id = job_manager.create_job(req.source)
-    enqueue_job(job_id, req.source)
+    enqueue_job(job_id, req.source, req.content_plan, req.brand_context)
     return ProcessResponse(job_id=job_id, status="queued")
+
 
 @app.get("/status/{job_id}", response_model=StatusResponse)
 def get_status(job_id: str):
@@ -32,16 +57,16 @@ def get_status(job_id: str):
         result=job["result"],
     )
 
+
 @app.get("/jobs")
 def list_jobs():
     return job_manager.list_jobs()
+
 
 @app.get("/health")
 def health():
     return JSONResponse({"status": "ok"})
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONTENT_BANK = PROJECT_ROOT / "output" / "content_bank.json"
 
 @app.get("/next-scheduled-post")
 def next_scheduled_post():
@@ -51,13 +76,14 @@ def next_scheduled_post():
     with open(CONTENT_BANK, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    pending = [item for item in data["items"] if item["status"] == "pending"]
+    pending = [item for item in data["items"] if item["status"] in ("pending", "scheduled_repost")]
     if not pending:
         return {"message": "No pending items to post"}
 
     pending.sort(key=lambda x: x["scheduled_date"])
     next_item = pending[0]
     return next_item
+
 
 @app.get("/campaign-summary")
 def get_campaign_summary():
@@ -76,6 +102,7 @@ def get_campaign_calendar():
     with open(calendar_file, "r", encoding="utf-8") as f:
         return {"calendar_markdown": f.read()}
 
+
 @app.get("/download-campaign/{job_id}")
 def download_campaign(job_id: str):
     job = job_manager.get(job_id)
@@ -90,9 +117,8 @@ def download_campaign(job_id: str):
         zip_path,
         media_type="application/zip",
         filename=f"campaign_{job_id[:8]}.zip"
-
-
     )
+
 
 @app.get("/strategy-brief")
 def get_strategy_brief():
@@ -101,7 +127,7 @@ def get_strategy_brief():
         raise HTTPException(status_code=404, detail="Strategy brief not found")
     with open(brief_file, "r", encoding="utf-8") as f:
         return {"strategy_brief": f.read()}
-    
+
 
 @app.post("/mark-posted/{clip_id}")
 def mark_posted(clip_id: str):
@@ -117,8 +143,64 @@ def mark_posted(clip_id: str):
 
     return {"status": "updated", "id": clip_id}
 
-@app.post("/process", response_model=ProcessResponse)
-def process_video(req: ProcessRequest):
-    job_id = job_manager.create_job(req.source)
-    enqueue_job(job_id, req.source, req.content_plan, req.brand_context)
-    return ProcessResponse(job_id=job_id, status="queued")
+@app.post("/recommend-plan")
+def recommend_plan(brand_context: dict):
+    try:
+        plan = recommend(brand_context)
+        return {"content_plan": plan}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/platform-specs")
+def platform_specs():
+    """Duration, cadence, and format rules the selector uses."""
+    return {
+        "platforms": PLATFORM_SPECS,
+        "candidate_target_seconds": list(CANDIDATE_TARGET_SECONDS),
+    }
+
+
+@app.get("/package-manifest")
+def package_manifest():
+    manifest_file = PROJECT_ROOT / "output" / "package_manifest.json"
+    if not manifest_file.exists():
+        raise HTTPException(status_code=404, detail="Package manifest not found")
+    with open(manifest_file, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+@app.post("/performance/{item_id}")
+def record_performance(item_id: str, req: PerformanceRequest):
+    try:
+        metrics = req.model_dump(exclude_none=True) if hasattr(req, "model_dump") else req.dict(exclude_none=True)
+        variant_id = metrics.pop("variant_id", None)
+        item = record_performance(item_id, metrics, variant_id=variant_id)
+        return {"status": "updated", "item": item}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Content bank not found")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Item not found")
+
+
+@app.get("/winners")
+def get_winners():
+    try:
+        return {"winners": list_winners()}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Content bank not found")
+
+
+@app.post("/repost/{item_id}")
+def repost_winner(item_id: str, req: RepostRequest = RepostRequest()):
+    try:
+        clone = schedule_repost(
+            item_id,
+            platform=req.platform,
+            days=req.days,
+        )
+        return {"status": "scheduled", "item": clone}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Content bank not found")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Item not found")

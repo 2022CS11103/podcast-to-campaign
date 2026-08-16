@@ -9,63 +9,77 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from utils.gemini_clients import get_client
 from utils.cost_tracker import log_gemini_call
+from config.platform_specs import platforms_for_duration
 
 PROMPT = """
 You are an expert content strategist, YouTube growth expert, and podcast editor.
 
-Your job is to identify whether a transcript chunk is worth turning into a YouTube Short.
+Your job is to decide whether this transcript window is worth turning into a short-form clip.
 
-Analyze the transcript carefully.
+The window is already cut on sentence boundaries. Judge the OPENING (first 1-3 seconds / first sentence) especially hard — that is the hook.
 
 Score the following (0-10):
 
-1. Hook Strength
+1. Hook Strength (does the first sentence stop a scroll?)
 2. Educational Value
 3. Emotional Impact
 4. Curiosity
 5. Shareability
+6. Completeness (does the idea resolve, or is it a mid-thought?)
 
 Also return:
 
-- summary
-- hook
+- summary (1 sentence)
+- hook (max 12 words, as it would appear on screen)
 - reason
-- best_platform
+- best_platform (one of: YouTube Shorts, Instagram Reels, TikTok, LinkedIn, Twitter)
 - overall_score (0-100)
+- starts_mid_thought (true/false)
+- payoff_arrives (true/false) — viewer gets a complete takeaway before the clip ends
 
-Return ONLY valid JSON.
-
-Example:
-
-{
-    "summary":"...",
-    "hook":"...",
-    "scores":{
-        "hook":9,
-        "education":8,
-        "emotion":7,
-        "curiosity":9,
-        "shareability":8
-    },
-    "overall_score":88,
-    "best_platform":"YouTube Shorts",
-    "reason":"Strong hook with educational value."
-}
-
-Transcript:
+Return ONLY valid JSON with keys: summary, hook, scores (hook/education/emotion/curiosity/shareability/completeness), overall_score, best_platform, reason, starts_mid_thought, payoff_arrives.
 """
 
 
-def analyze_chunk(text):
+def analyze_chunk(text, duration, platforms):
     client = get_client()
+    prompt = (
+        PROMPT
+        + f"\nClip duration (seconds): {duration}\n"
+        + f"Suggested platforms for this length: {', '.join(platforms) or 'any'}\n\n"
+        + "Transcript:\n"
+        + text
+    )
     response = client.models.generate_content(
         model="gemini-3.1-flash-lite",
-        contents=PROMPT + text
+        contents=prompt
     )
 
-    log_gemini_call("highlight_analysis", response)   # <-- naya
+    log_gemini_call("highlight_analysis", response)
 
     return response.text
+
+
+def parse_analysis(raw):
+    cleaned = (
+        raw.replace("```json", "")
+           .replace("```", "")
+           .strip()
+    )
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        return {
+            "summary": "",
+            "hook": "",
+            "scores": {},
+            "overall_score": 0,
+            "best_platform": "",
+            "reason": "",
+            "starts_mid_thought": False,
+            "payoff_arrives": False,
+            "raw_response": raw,
+        }
 
 
 def main():
@@ -82,36 +96,30 @@ def main():
 
     for chunk in data["chunks"]:
 
-        print(f"Analyzing Chunk {chunk['chunk_id']}...")
+        print(f"Analyzing Chunk {chunk['chunk_id']} ({chunk.get('duration_seconds', '?')}s)...")
 
-        raw = analyze_chunk(chunk["text"])
+        duration = chunk.get("duration_seconds")
+        if duration is None:
+            duration = round(float(chunk.get("end", 0)) - float(chunk.get("start", 0)), 2)
 
-        try:
-            # Gemini sometimes returns ```json ... ```
-            cleaned = (
-                raw.replace("```json", "")
-                   .replace("```", "")
-                   .strip()
-            )
+        platforms = chunk.get("fits_platforms") or platforms_for_duration(duration)
+        raw = analyze_chunk(chunk["text"], duration, platforms)
+        analysis = parse_analysis(raw)
 
-            analysis = json.loads(cleaned)
-
-        except Exception:
-
-            analysis = {
-                "summary": "",
-                "hook": "",
-                "scores": {},
-                "overall_score": 0,
-                "best_platform": "",
-                "reason": "",
-                "raw_response": raw
-            }
+        # Penalize incomplete thoughts so they rarely survive ranking.
+        if analysis.get("starts_mid_thought"):
+            analysis["overall_score"] = max(0, int(analysis.get("overall_score", 0)) - 20)
+        if analysis.get("payoff_arrives") is False:
+            analysis["overall_score"] = max(0, int(analysis.get("overall_score", 0)) - 15)
 
         analysis["start"] = chunk["start"]
         analysis["end"] = chunk["end"]
         analysis["chunk_id"] = chunk["chunk_id"]
         analysis["word_count"] = chunk["word_count"]
+        analysis["duration_seconds"] = duration
+        analysis["target_duration"] = chunk.get("target_duration")
+        analysis["fits_platforms"] = platforms
+        analysis["text"] = chunk["text"]
 
         results.append(analysis)
 
@@ -120,16 +128,10 @@ def main():
     }
 
     output_file = PROJECT_ROOT / "output" / "analysis.json"
-
     output_file.parent.mkdir(exist_ok=True)
 
     with open(output_file, "w", encoding="utf-8") as f:
-        json.dump(
-            output,
-            f,
-            indent=2,
-            ensure_ascii=False
-        )
+        json.dump(output, f, indent=2, ensure_ascii=False)
 
     print(f"\n✅ Analysis saved to {output_file}")
 

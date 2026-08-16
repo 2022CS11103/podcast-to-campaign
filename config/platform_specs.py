@@ -1,0 +1,143 @@
+"""
+Canonical rules for how long each piece of content should be,
+which platforms it belongs on, and roughly what a job costs.
+
+This is the source of truth the clip selector, ranker, router,
+and cost estimator all read from — so duration / mix / pricing
+decisions stay consistent instead of being hardcoded in scripts.
+"""
+
+# Platforms that require a rendered vertical video file.
+VIDEO_PLATFORMS = ("youtube_shorts", "instagram_reels", "tiktok")
+
+# Platforms that reuse clip insights as text (no extra video render).
+TEXT_PLATFORMS = ("linkedin", "twitter", "blog", "newsletter")
+
+# Always produced once per long-form source, not allocated per-clip.
+PILLAR_OUTPUTS = ("blog", "newsletter")
+
+PLATFORM_SPECS = {
+    "youtube_shorts": {
+        "label": "YouTube Shorts",
+        "format": "vertical_video",
+        "min_seconds": 15,
+        "ideal_seconds": 35,
+        "max_seconds": 60,
+        "hook_seconds": 3,
+        "why": "Retention drops after ~40s unless the payoff is a tutorial. Hook must land before the 3s replay button.",
+        "posting_cadence_days": 3,
+    },
+    "instagram_reels": {
+        "label": "Instagram Reels",
+        "format": "vertical_video",
+        "min_seconds": 12,
+        "ideal_seconds": 22,
+        "max_seconds": 45,
+        "hook_seconds": 2,
+        "why": "Reels distribution favors 15–30s. Longer only if the clip is a tight educational framework.",
+        "posting_cadence_days": 3,
+    },
+    "tiktok": {
+        "label": "TikTok",
+        "format": "vertical_video",
+        "min_seconds": 12,
+        "ideal_seconds": 25,
+        "max_seconds": 45,
+        "hook_seconds": 1.5,
+        "why": "First 1–2 seconds decide the loop. Prefer a question or bold claim on screen immediately.",
+        "posting_cadence_days": 2,
+    },
+    "linkedin": {
+        "label": "LinkedIn",
+        "format": "text_post",
+        "min_words": 80,
+        "ideal_words": 160,
+        "max_words": 220,
+        "why": "Thought-leadership posts in the 120–200 word range get more dwell time than dump-and-hashtag.",
+        "posting_cadence_days": 7,
+    },
+    "twitter": {
+        "label": "X / Twitter",
+        "format": "thread",
+        "min_tweets": 4,
+        "ideal_tweets": 6,
+        "max_tweets": 8,
+        "why": "A 5–7 tweet thread from one insight outperforms a single clip dump. Lead tweet is the hook.",
+        "posting_cadence_days": 4,
+    },
+    "blog": {
+        "label": "SEO blog",
+        "format": "article",
+        "min_words": 900,
+        "ideal_words": 1200,
+        "max_words": 1500,
+        "why": "One pillar article per talk, targeting a searchable course/topic keyword. Shorts do not rank; this does.",
+        "posting_cadence_days": 30,
+    },
+    "newsletter": {
+        "label": "Newsletter",
+        "format": "email",
+        "min_words": 220,
+        "ideal_words": 320,
+        "max_words": 450,
+        "why": "One email per talk. Warm recap + one clip CTA + course link. Not a transcript dump.",
+        "posting_cadence_days": 14,
+    },
+}
+
+# Candidate windows the parser will try to cut on. Each talk is sliced
+# toward these targets, then scored. Ranker maps windows onto platforms.
+CANDIDATE_TARGET_SECONDS = (20, 35, 50)
+CANDIDATE_MIN_SECONDS = 12
+CANDIDATE_MAX_SECONDS = 60
+# Hard cap on Gemini analysis calls per job (cost control).
+MAX_ANALYZED_CANDIDATES = 24
+
+# A/B: three hook/caption variants per clip. Variant A ships first;
+# B/C are held for tests or used if A underperforms.
+AB_VARIANT_IDS = ("A", "B", "C")
+
+# Repost a winner after this many days on a second platform or with
+# the winning variant as the thumbnail/hook.
+REPOST_AFTER_DAYS = 14
+WINNER_MIN_VIEWS = 500
+WINNER_MIN_ENGAGEMENT_RATE = 0.04  # likes+comments / views
+
+
+def video_platform_keys(plan: dict) -> list:
+    return [k for k in plan.keys() if k in VIDEO_PLATFORMS]
+
+
+def text_platform_keys(plan: dict) -> list:
+    return [k for k in plan.keys() if k in TEXT_PLATFORMS]
+
+
+def video_clip_demand(plan: dict) -> int:
+    """How many unique videos we actually need to render."""
+    return sum(int(plan[k].get("count", 0)) for k in video_platform_keys(plan))
+
+
+def duration_fit(duration_seconds: float, platform: str) -> float:
+    """
+    0–1 score of how well a clip length matches a platform.
+    Used by the ranker so a 55s explainer is not sent to Reels.
+    """
+    spec = PLATFORM_SPECS.get(platform) or {}
+    lo = spec.get("min_seconds")
+    hi = spec.get("max_seconds")
+    ideal = spec.get("ideal_seconds")
+    if lo is None or hi is None or ideal is None:
+        return 0.5
+    if duration_seconds < lo or duration_seconds > hi:
+        return 0.0
+    # triangular peak at ideal
+    span = max(ideal - lo, hi - ideal, 1)
+    return max(0.0, 1.0 - abs(duration_seconds - ideal) / span)
+
+
+def platforms_for_duration(duration_seconds: float) -> list:
+    return [
+        p
+        for p in VIDEO_PLATFORMS
+        if duration_fit(duration_seconds, p) > 0
+    ]

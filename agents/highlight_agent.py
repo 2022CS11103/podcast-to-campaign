@@ -15,9 +15,10 @@ class HighlightAgent(BaseAgent):
 
     def run(self):
 
-        self.log("Analyzing transcript...")
+        self.log("Analyzing transcript windows...")
 
-        # AI analyzes transcript chunks
+        # Score every candidate. Ranking happens AFTER strategy so we
+        # know how many videos the campaign actually needs.
         subprocess.run(
             [
                 PYTHON,
@@ -27,29 +28,11 @@ class HighlightAgent(BaseAgent):
             check=True
         )
 
-        self.log("Ranking best clips...")
-
-        # Rank clips
-        subprocess.run(
-            [
-                PYTHON,
-                "scripts/ai/clip_ranker.py"
-            ],
-            cwd=PROJECT_ROOT,
-            check=True
-        )
-
-        # Update shared memory
         self.memory.update(
             "analysis_path",
             "output/analysis.json"
         )
 
-        self.memory.update(
-            "clips_path",
-            "output/clips.json"
-        )
+        self.log("Highlight analysis completed.")
 
-        self.log("Highlight generation completed.")
-
-        return "output/clips.json"
+        return "output/analysis.json"
