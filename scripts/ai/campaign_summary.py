@@ -50,10 +50,14 @@ def main():
         "total_content_pieces": len(items),
         "platform_breakdown": platform_counts,
         "campaign_span_days": campaign_span_days,
+        "pillar_blog": (PROJECT_ROOT / "output" / "blog.md").exists(),
+        "newsletter": (PROJECT_ROOT / "output" / "newsletter.md").exists(),
+        "ab_variants_per_clip": 3,
         "estimated_cost_inr": cost_report.get("estimated_cost_inr", 0),
         "estimated_cost_usd": cost_report.get("estimated_cost_usd", 0),
         "total_ai_calls": cost_report.get("total_gemini_calls", 0),
         "whisper_processing_seconds": cost_report.get("whisper_processing_seconds", 0),
+        "unit_economics": cost_report.get("unit_economics"),
     }
 
     # human-readable markdown version
@@ -67,7 +71,10 @@ def main():
     for platform, count in platform_counts.items():
         label = platform.replace("_", " ").title()
         lines.append(f"  - {count} × {label}")
-    lines.append(f"- Spread across **{summary['campaign_span_days']} days**\n")
+    lines.append(f"- Spread across **{summary['campaign_span_days']} days**")
+    lines.append(f"- SEO pillar blog: {'yes' if summary['pillar_blog'] else 'no'}")
+    lines.append(f"- Newsletter: {'yes' if summary['newsletter'] else 'no'}")
+    lines.append(f"- A/B variants: {summary['ab_variants_per_clip']} hooks per clip\n")
     lines.append(f"## Cost")
     lines.append(f"- Estimated cost: ₹{summary['estimated_cost_inr']} (${summary['estimated_cost_usd']})")
     lines.append(f"- AI calls used: {summary['total_ai_calls']}")
