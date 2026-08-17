@@ -1,15 +1,15 @@
 """Maps backend job.step names to the 9-step Lovable processing UI."""
 
 UI_STEPS = [
-    {"id": "video", "index": 1, "label": "Video Processing"},
-    {"id": "transcript", "index": 2, "label": "Transcript Generation"},
-    {"id": "highlight", "index": 3, "label": "AI Content Understanding"},
-    {"id": "ranking", "index": 4, "label": "Highlight Detection"},
-    {"id": "editing", "index": 5, "label": "Video Editing"},
-    {"id": "routing", "index": 6, "label": "Platform Intelligence"},
-    {"id": "marketing", "index": 7, "label": "Marketing Content Generation"},
-    {"id": "planning", "index": 8, "label": "Campaign Planning"},
-    {"id": "packaging", "index": 9, "label": "Packaging Marketing Kit"},
+    {"id": "video", "index": 1, "label": "Ingesting the talk"},
+    {"id": "transcript", "index": 2, "label": "Listening for standout moments"},
+    {"id": "highlight", "index": 3, "label": "Editor scoring hooks"},
+    {"id": "ranking", "index": 4, "label": "Picking distinct Shorts vs Reels"},
+    {"id": "editing", "index": 5, "label": "Cutting vertical edits"},
+    {"id": "routing", "index": 6, "label": "Routing to each platform"},
+    {"id": "marketing", "index": 7, "label": "Writing captions like a strategist"},
+    {"id": "planning", "index": 8, "label": "Building the posting calendar"},
+    {"id": "packaging", "index": 9, "label": "Packaging the campaign kit"},
 ]
 
 # strategy/ranking both sit on UI step 4 (Highlight Detection)

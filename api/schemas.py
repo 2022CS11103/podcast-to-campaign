@@ -52,6 +52,7 @@ class ProcessRequest(BaseModel):
 class ProcessResponse(BaseModel):
     job_id: str
     status: str
+    studio_url: Optional[str] = "/studio"
 
 
 class StatusResponse(BaseModel):

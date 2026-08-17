@@ -48,6 +48,12 @@ def main():
         with open(timing_file, "r", encoding="utf-8") as f:
             timing = json.load(f)
 
+    scan = {}
+    transcript_file = output_dir / "transcript.json"
+    if transcript_file.exists():
+        with open(transcript_file, "r", encoding="utf-8") as f:
+            scan = json.load(f).get("scan") or {}
+
     summary = {
         "brand_name": brand.get("brand_name", "N/A"),
         "campaign_goal": brand.get("goal", "N/A"),
@@ -67,6 +73,8 @@ def main():
         "processing_human": timing.get("total_human", "0s"),
         "step_timings": timing.get("steps", []),
         "unit_economics": cost_report.get("unit_economics"),
+        "scan": scan,
+        "analysis_mode": "audio_first",
     }
 
     # human-readable markdown version
@@ -84,6 +92,15 @@ def main():
     lines.append(f"- SEO pillar blog: {'yes' if summary['pillar_blog'] else 'no'}")
     lines.append(f"- Newsletter: {'yes' if summary['newsletter'] else 'no'}")
     lines.append(f"- A/B variants: {summary['ab_variants_per_clip']} hooks per clip\n")
+    if scan:
+        scanned = scan.get("scanned_seconds")
+        source = scan.get("source_seconds")
+        lines.append(f"## Scan")
+        lines.append(
+            f"- Covered **{scanned}s** of **{source}s**"
+            f"{' and stopped early' if scan.get('stopped_early') else ''}"
+        )
+        lines.append(f"- Analysis mode: audio-first (visual scoring next)\n")
     lines.append(f"## Timing")
     lines.append(f"- **Total campaign time:** {summary['processing_human']}")
     for step in summary.get("step_timings") or []:

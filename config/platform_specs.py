@@ -100,20 +100,21 @@ MIN_OVERALL_SCORE = 60
 # Ranker will not keep a clip below this unless it is the only option.
 USABLE_SCORE_FLOOR = 48
 
-# Encode this many unique vertical videos, then copy them onto
-# Shorts / Reels / TikTok. 2 Reels + 1 Short → 2 encodes, not 3.
-MAX_UNIQUE_RENDERS = 3
+# Encode distinct moments for Shorts vs Reels when we can.
+# 2 Shorts + 3 Reels → try 5 unique cuts, cap so a 1-hour talk stays cheap.
+MAX_UNIQUE_RENDERS = 5
 
 # Transcribe/score the talk in slices. Stop as soon as enough
 # unique clips clear MIN_OVERALL_SCORE — no need to parse a full hour.
-# 3-minute windows for Gemini candidate grouping.
-# Whisper itself only ever sees 30s slices (Windows RAM).
 SCAN_WINDOW_SECONDS = 180
 WHISPER_SLICE_SECONDS = 15
 CANDIDATES_PER_WINDOW = 3
-# After this much of a long talk, proceed with whatever usable clips
-# we have instead of hunting the remaining 50 minutes.
-MAX_SCAN_SECONDS = 720
+# First 15 minutes is enough if we already have the requested highlights.
+MAX_SCAN_SECONDS = 900
+
+# Audio-first today. Visual (face, B-roll, silence, on-screen energy)
+# lands next — keep this False until the studio board is the source of truth.
+VIDEO_ANALYSIS_ENABLED = False
 
 # A/B: three hook/caption variants per clip. Variant A ships first;
 # B/C are held for tests or used if A underperforms.
@@ -147,9 +148,14 @@ def video_slot_demand(plan: dict) -> int:
 
 def video_clip_demand(plan: dict) -> int:
     """
-    Unique ffmpeg renders. One strong moment is copied to Shorts and
-    Reels, so demand is max(platform counts), not the sum.
+    Unique ffmpeg renders. Shorts and Reels should be different moments
+    when the talk has enough strong clips, so demand is the sum of video
+    slots, capped — not max(platform).
     """
+    return min(video_slot_demand(plan), MAX_UNIQUE_RENDERS) or 0
+
+
+def largest_video_count(plan: dict) -> int:
     counts = []
     for k in video_platform_keys(plan):
         try:
@@ -158,9 +164,7 @@ def video_clip_demand(plan: dict) -> int:
             continue
         if n > 0:
             counts.append(n)
-    if not counts:
-        return 0
-    return min(max(counts), MAX_UNIQUE_RENDERS)
+    return max(counts) if counts else 0
 
 
 def duration_fit(duration_seconds: float, platform: str) -> float:

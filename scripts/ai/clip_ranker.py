@@ -47,8 +47,9 @@ def ranking_score(clip):
 
 def get_top_k():
     """
-    Unique renders = max(Shorts, Reels, TikTok), capped.
-    Router copies those files onto every requested video platform.
+    Unique renders = Shorts + Reels + TikTok slots, capped.
+    Router then assigns distinct moments round-robin so platforms
+    do not all open with the same file.
     """
     plan = load_plan(required=True)
     video_needed = video_clip_demand(plan)

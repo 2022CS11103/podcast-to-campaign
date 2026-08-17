@@ -27,6 +27,7 @@ from config.platform_specs import (
     CANDIDATES_PER_WINDOW,
     MAX_SCAN_SECONDS,
     video_clip_demand,
+    largest_video_count,
 )
 from utils.content_plan import load_plan, plan_is_usable
 from utils.cost_tracker import log_whisper_time
@@ -70,9 +71,10 @@ def clips_needed():
     plan = load_plan(required=False)
     if plan_is_usable(plan):
         n = video_clip_demand(plan)
+        largest = largest_video_count(plan)
         if n > 0:
-            return n
-    return 3
+            return n, largest
+    return 3, 3
 
 
 def collect_segments(wav, window_start, duration):
@@ -169,11 +171,11 @@ def main():
     if duration <= 0:
         duration = 24 * 3600
 
-    needed = clips_needed()
+    needed, largest = clips_needed()
     print(
-        f"Scan-until-good: need {needed} unique clips >= {MIN_OVERALL_SCORE}. "
-        f"Video {duration:.0f}s, window {SCAN_WINDOW_SECONDS}s, "
-        f"hard stop after {MAX_SCAN_SECONDS}s if at least one usable clip."
+        f"Scan-until-good: need {needed} distinct clips >= {MIN_OVERALL_SCORE} "
+        f"(stop after {MAX_SCAN_SECONDS}s if {largest}+ highlights exist). "
+        f"Video {duration:.0f}s, window {SCAN_WINDOW_SECONDS}s."
     )
 
     engine = "whisper-isolated"
@@ -222,13 +224,13 @@ def main():
         )
         if len(strong) >= needed:
             stopped_early = True
-            print("  enough unique clips — stopping scan, rest of video skipped.")
+            print("  enough distinct highlights — rest of video skipped.")
             break
-        if scanned >= MAX_SCAN_SECONDS and usable:
+        if scanned >= MAX_SCAN_SECONDS and len(strong) >= max(1, largest):
             stopped_early = True
             print(
-                f"  scanned {MAX_SCAN_SECONDS}s with {len(usable)} usable clip(s) "
-                "— stopping instead of parsing the rest of a long talk."
+                f"  first {MAX_SCAN_SECONDS}s already has {len(strong)} strong clip(s) "
+                f"(plan peak {largest}) — stopping like an editor who found the package."
             )
             break
 

@@ -16,6 +16,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 task_queue = queue.Queue()
 
+INTERMEDIATE_DIRS = [
+    "shorts",
+    "tracking",
+    "vertical_shorts",
+    "subtitles",
+]
+RENDER_DIRS = [
+    "final_shorts",
+    "youtube_shorts",
+    "instagram_reels",
+    "tiktok",
+    "posts",
+]
+
+
+def _wipe_output_dirs(names):
+    for name in names:
+        stale = PROJECT_ROOT / "output" / name
+        if stale.exists():
+            shutil.rmtree(stale)
+
 
 def _run_script(script: str):
     result = subprocess.run(
@@ -58,22 +79,9 @@ def _worker():
             reset_timer()
             job_manager.update(job_id, started_at=time.time(), timing=snapshot())
 
-            # Clean leftover files from the previous run so this job
-            # only ever sees clips it generated itself.
-            stale_dirs = [
-                PROJECT_ROOT / "output" / "shorts",
-                PROJECT_ROOT / "output" / "tracking",
-                PROJECT_ROOT / "output" / "final_shorts",
-                PROJECT_ROOT / "output" / "vertical_shorts",
-                PROJECT_ROOT / "output" / "youtube_shorts",
-                PROJECT_ROOT / "output" / "instagram_reels",
-                PROJECT_ROOT / "output" / "tiktok",
-                PROJECT_ROOT / "output" / "posts",
-                PROJECT_ROOT / "output" / "subtitles",
-            ]
-            for stale_dir in stale_dirs:
-                if stale_dir.exists():
-                    shutil.rmtree(stale_dir)
+            # Wipe scratch folders now. Keep last campaign's playable
+            # Shorts/Reels until we are about to cut replacements.
+            _wipe_output_dirs(INTERMEDIATE_DIRS)
 
             if brand_context:
                 brand_file = PROJECT_ROOT / "brand_context.json"
@@ -93,6 +101,7 @@ def _worker():
             _timed(job_id, "highlight", creator.highlight.run)
             _timed(job_id, "strategy", lambda: _run_script("scripts/ai/strategy_agent.py"))
             _timed(job_id, "ranking", lambda: _run_script("scripts/ai/clip_ranker.py"))
+            _wipe_output_dirs(RENDER_DIRS)
             _timed(job_id, "editing", creator.editor.run)
             _timed(job_id, "routing", lambda: _run_script("scripts/ai/platform_router.py"))
             _timed(job_id, "marketing", creator.marketing.run)
@@ -129,6 +138,7 @@ def _worker():
                 "package_manifest": str(PROJECT_ROOT / "output" / "package_manifest.json"),
                 "timing_report": str(PROJECT_ROOT / "output" / "timing_report.json"),
                 "campaign_zip": zip_path,
+                "studio_url": "/studio",
                 "cost_report": cost_report,
                 "timing": timing,
                 "elapsed_seconds": timing["total_seconds"],

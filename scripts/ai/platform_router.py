@@ -87,8 +87,8 @@ def copy_to_platform_folder(source_video: Path, platform: str, dest_name: str):
 
 def fill_platform_slots(clips, count, platform, used_ids):
     """
-    Fill the requested count. Prefer unused unique moments first,
-    then reuse (same render, different scheduled post / caption).
+    Fill requested count. Prefer unused unique moments first,
+    then reuse only if this platform still has empty slots.
     """
     if count <= 0 or not clips:
         return []
@@ -105,6 +105,74 @@ def fill_platform_slots(clips, count, platform, used_ids):
     else:
         print(f"   {platform}: {count} unique clip(s)")
     return selected
+
+
+def assign_distinct_video_slots(clips, plan):
+    """
+    Round-robin Shorts / Reels / TikTok so the first Reel is not the
+    same file as the first Short. Prefer a moment that no video
+    platform has used yet.
+    """
+    platforms = [
+        p for p in VIDEO_PLATFORMS
+        if p in plan and int(plan[p].get("count", 0)) > 0
+    ]
+    remaining = {p: int(plan[p]["count"]) for p in platforms}
+    used_on = {p: set() for p in platforms}
+    assigned_ids = set()
+    picks = {p: [] for p in platforms}
+
+    def best_for(platform):
+        unused_global = [c for c in clips if c.get("chunk_id") not in assigned_ids]
+        unused_here = [c for c in clips if c.get("chunk_id") not in used_on[platform]]
+        unused_global.sort(key=lambda c: platform_fit_score(c, platform), reverse=True)
+        unused_here.sort(key=lambda c: platform_fit_score(c, platform), reverse=True)
+        if unused_global:
+            return unused_global[0], False
+        if unused_here:
+            return unused_here[0], False
+        ranked = sorted(clips, key=lambda c: platform_fit_score(c, platform), reverse=True)
+        if ranked:
+            return ranked[0], True
+        return None, False
+
+    while any(remaining[p] > 0 for p in platforms):
+        progressed = False
+        for platform in platforms:
+            if remaining[platform] <= 0:
+                continue
+            clip, looped = best_for(platform)
+            if clip is None:
+                continue
+            reused_on_this_platform = clip.get("chunk_id") in used_on[platform]
+            picks[platform].append((clip, reused_on_this_platform or looped))
+            used_on[platform].add(clip.get("chunk_id"))
+            assigned_ids.add(clip.get("chunk_id"))
+            remaining[platform] -= 1
+            progressed = True
+        if not progressed:
+            break
+    for platform, chosen in picks.items():
+        unique_n = len({c.get("chunk_id") for c, _ in chosen})
+        print(f"   {platform}: {len(chosen)} slots from {unique_n} distinct moments")
+    return picks
+
+
+def editor_note(clip, platform, reused):
+    spec = PLATFORM_SPECS.get(platform, {})
+    label = spec.get("label", platform.replace("_", " ").title())
+    hook = clip.get("hook") or "this beat"
+    if reused:
+        return (
+            f"Later {label} slot: same talk, new calendar date. "
+            f"We already posted \"{hook}\" once here, so this is a scheduled remix — "
+            f"not a copy-paste of the other platform's first drop."
+        )
+    return (
+        f"Editor pick for {label}: \"{hook}\" "
+        f"({clip.get('duration_seconds')}s, score {clip.get('overall_score')}) "
+        f"— {spec.get('why', 'best fit for this platform.')}"
+    )
 
 
 def empty_performance():
@@ -138,7 +206,7 @@ def main():
     item_counter = 1
     today = datetime.now()
 
-    # Video platforms share the same unique renders (copy, don't re-encode).
+    video_picks = assign_distinct_video_slots(clips, plan)
     ordered_platforms = [p for p in plan.keys() if p in VIDEO_PLATFORMS]
     ordered_platforms += [p for p in plan.keys() if p not in VIDEO_PLATFORMS]
 
@@ -148,11 +216,12 @@ def main():
         is_video = platform in VIDEO_PLATFORMS
 
         if is_video:
-            selected = fill_platform_slots(clips, count, platform, used_ids)
+            selected_pairs = video_picks.get(platform) or []
+            selected = [c for c, _ in selected_pairs]
+            reuse_flags = [r for _, r in selected_pairs]
         else:
-            # Text posts reuse the same insights on a calendar — fill the
-            # requested count even if we only found one strong moment.
             selected = fill_platform_slots(clips, count, platform, set())
+            reuse_flags = [False] * len(selected)
 
         for i, clip in enumerate(selected):
             duration = round(
@@ -162,6 +231,7 @@ def main():
             video_filename = clip_video_filename(clips, clip.get("chunk_id"))
             source_video = shorts_dir / video_filename if video_filename else shorts_dir / "missing.mp4"
             scheduled_date = today + timedelta(days=interval_days * i)
+            reused = reuse_flags[i] if i < len(reuse_flags) else False
 
             platform_video_path = None
             if is_video and video_filename:
@@ -197,6 +267,8 @@ def main():
                 "performance": empty_performance(),
                 "repost_count": 0,
                 "parent_id": None,
+                "reused_render": reused,
+                "editor_note": editor_note(clip, platform, reused),
             })
 
             if is_video and clip.get("chunk_id") not in used_ids:

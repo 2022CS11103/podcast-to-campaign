@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import json
 import time
 from pathlib import Path
+from urllib.parse import unquote
 from api.schemas import (
     ProcessRequest,
     ProcessResponse,
@@ -39,6 +40,10 @@ app.add_middleware(
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONTENT_BANK = PROJECT_ROOT / "output" / "content_bank.json"
+FRONTEND_DIR = PROJECT_ROOT / "frontend"
+MEDIA_FOLDERS = {
+    "final_shorts", "youtube_shorts", "instagram_reels", "tiktok", "posts",
+}
 
 DISCONNECTED_ACCOUNTS = [
     {"platform": "youtube", "label": "YouTube", "status": "not_connected", "connected": False},
@@ -61,6 +66,155 @@ def root():
 @app.get("/health")
 def health():
     return JSONResponse({"status": "ok"})
+
+
+@app.get("/studio")
+@app.get("/studio/")
+def studio():
+    index = FRONTEND_DIR / "index.html"
+    if not index.exists():
+        raise HTTPException(status_code=404, detail="Studio UI is missing")
+    return FileResponse(index, media_type="text/html")
+
+
+@app.get("/media/{folder}/{filename}")
+def get_media(folder: str, filename: str):
+    filename = unquote(filename).split("?")[0].strip()
+    if folder not in MEDIA_FOLDERS or "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=404, detail="Not found")
+    path = PROJECT_ROOT / "output" / folder / filename
+    if not path.exists() or not path.is_file():
+        fallback = _media_fallback(folder, filename)
+        if fallback is None:
+            raise HTTPException(status_code=404, detail="File not found")
+        path = fallback
+    suffix = path.suffix.lower()
+    media_type = {
+        ".mp4": "video/mp4",
+        ".md": "text/markdown",
+        ".json": "application/json",
+        ".srt": "text/plain",
+        ".ass": "text/plain",
+    }.get(suffix, "application/octet-stream")
+    return FileResponse(path, media_type=media_type, filename=path.name)
+
+
+def _play_url(path_str):
+    if not path_str:
+        return None
+    p = Path(path_str)
+    if not p.is_absolute():
+        p = PROJECT_ROOT / p
+    if not p.exists() or not p.is_file():
+        return None
+    if p.parent.name in MEDIA_FOLDERS:
+        return f"/media/{p.parent.name}/{p.name}"
+    return None
+
+
+def _item_play_url(item):
+    return _play_url(item.get("platform_video_file")) or _play_url(item.get("video_file"))
+
+
+def _media_fallback(folder: str, filename: str):
+    """If a platform copy was wiped mid-job, serve the source cut instead."""
+    if not CONTENT_BANK.exists():
+        return None
+    with open(CONTENT_BANK, "r", encoding="utf-8") as f:
+        bank = json.load(f)
+    needle = filename.lower()
+    for item in bank.get("items", []):
+        platform_file = item.get("platform_video_file") or ""
+        if Path(platform_file).name.lower() != needle:
+            continue
+        src = item.get("video_file")
+        if not src:
+            continue
+        p = Path(src)
+        if not p.is_absolute():
+            p = PROJECT_ROOT / p
+        if p.exists() and p.is_file():
+            return p
+    final = PROJECT_ROOT / "output" / "final_shorts" / filename
+    if final.exists() and final.is_file():
+        return final
+    return None
+
+
+def _decorate_board_items(raw_items):
+    """
+    Same talk moment can fill Shorts and Reels. The board must still
+    look like different posts: rotate A/B/C copy and label the package.
+    """
+    platforms_by_chunk = {}
+    for item in raw_items:
+        cid = item.get("chunk_id")
+        plat = item.get("assigned_platform")
+        platforms_by_chunk.setdefault(cid, [])
+        if plat not in platforms_by_chunk[cid]:
+            platforms_by_chunk[cid].append(plat)
+
+    variant_cursor = {}
+    seen_on_platform = {}
+    items = []
+    for item in raw_items:
+        row = dict(item)
+        cid = item.get("chunk_id")
+        plat = item.get("assigned_platform")
+        variants = item.get("variants") or []
+        n = variant_cursor.get(cid, 0)
+        variant_cursor[cid] = n + 1
+        chosen = variants[min(n, max(len(variants) - 1, 0))] if variants else {}
+        also_on = [p for p in platforms_by_chunk.get(cid, []) if p != plat]
+        here_key = (plat, cid)
+        reused_here = seen_on_platform.get(here_key, 0) > 0
+        seen_on_platform[here_key] = seen_on_platform.get(here_key, 0) + 1
+        if reused_here:
+            package_label = "calendar remix · different angle"
+        elif also_on:
+            package_label = "same moment · rewritten for this platform"
+        else:
+            package_label = "distinct opening"
+        row["play_url"] = _item_play_url(item)
+        row["display_hook"] = chosen.get("hook") or item.get("hook")
+        row["display_caption"] = chosen.get("caption") or item.get("summary")
+        row["display_angle"] = chosen.get("angle") or item.get("content_angle")
+        row["variant_id"] = chosen.get("id") or item.get("active_variant") or "A"
+        row["same_moment"] = bool(also_on)
+        row["also_on"] = also_on
+        row["package_label"] = package_label
+        items.append(row)
+    return items
+
+
+@app.get("/campaign-board")
+def campaign_board():
+    summary = {}
+    summary_file = PROJECT_ROOT / "output" / "campaign_summary.json"
+    if summary_file.exists():
+        with open(summary_file, "r", encoding="utf-8") as f:
+            summary = json.load(f)
+    bank = {}
+    if CONTENT_BANK.exists():
+        with open(CONTENT_BANK, "r", encoding="utf-8") as f:
+            bank = json.load(f)
+    items = _decorate_board_items(bank.get("items", []))
+    videos_ready = any(item.get("play_url") for item in items)
+    scan = summary.get("scan") or {}
+    transcript_file = PROJECT_ROOT / "output" / "transcript.json"
+    if not scan and transcript_file.exists():
+        with open(transcript_file, "r", encoding="utf-8") as f:
+            scan = json.load(f).get("scan") or {}
+    return {
+        "summary": summary,
+        "plan": bank.get("requested_plan"),
+        "total_allocated": bank.get("total_allocated", len(items)),
+        "video_renders": bank.get("video_renders"),
+        "videos_ready": videos_ready,
+        "scan": scan,
+        "analysis_mode": summary.get("analysis_mode") or "audio_first",
+        "items": items,
+    }
 
 
 def _accounts_payload():
@@ -107,7 +261,7 @@ def process_video(req: ProcessRequest):
 
     job_id = job_manager.create_job(req.source)
     enqueue_job(job_id, req.source, req.content_plan, req.brand_context)
-    return ProcessResponse(job_id=job_id, status="queued")
+    return ProcessResponse(job_id=job_id, status="queued", studio_url="/studio")
 
 
 @app.get("/status/{job_id}", response_model=StatusResponse)
