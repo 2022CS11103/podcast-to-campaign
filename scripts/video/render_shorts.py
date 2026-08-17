@@ -1,14 +1,14 @@
 """
-One FFmpeg pass per selected clip: seek + 9:16 + burn captions.
+One FFmpeg pass per selected clip: seek + 9:16 crop + captions.
 
-Old path re-encoded each clip three times (cut, vertical, subtitles)
-and ran YOLO on every frame even though the crop never used tracking.
-That was most of the 45 minutes on a 4-minute video.
+boxblur at 1080x1920 was the 30-minute bottleneck (5 clips ≈ 6 min each).
+Center-crop to 9:16 is a single scale+crop and looks more like a Short.
 """
 
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -16,36 +16,49 @@ sys.path.append(str(PROJECT_ROOT))
 
 
 def ffmpeg_subtitles_path(subtitle_file: Path) -> str:
-    return subtitle_file.resolve().as_posix().replace(":", r"\:")
+    """Relative POSIX path from project root — Windows drive-letter escaping breaks libass."""
+    resolved = subtitle_file.resolve()
+    try:
+        return resolved.relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except ValueError:
+        return resolved.as_posix().replace(":", r"\:")
 
 
 def render_clip(source: Path, start, end, subtitle_file: Path, output_file: Path):
     sub = ffmpeg_subtitles_path(subtitle_file)
-    filter_complex = (
-        "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-        "boxblur=20:10,crop=1080:1920[bg];"
-        "[0:v]scale=1080:-2:force_original_aspect_ratio=decrease[fg];"
-        f"[bg][fg]overlay=(W-w)/2:(H-h)/2,"
-        f"subtitles='{sub}':force_style="
-        "'FontName=Arial,FontSize=18,PrimaryColour=&HFFFFFF&,"
-        "OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,"
-        "Alignment=2,MarginV=60'"
+    # 9:16 fill (no extra punch-in — source talks are often 360p).
+    # Small ASS captions with outline sit in the lower third.
+    vf = (
+        "setpts=PTS-STARTPTS,"
+        "scale=1080:1920:force_original_aspect_ratio=increase,"
+        "crop=1080:1920,"
+        "unsharp=5:5:0.6:5:5:0.0,"
+        "eq=contrast=1.04:saturation=1.05,"
+        "setsar=1,"
+        f"subtitles='{sub}'"
     )
 
-    # -ss before -i seeks in the container (fast). Output starts at 0s
-    # so clip-relative SRT files line up.
     command = [
-        "ffmpeg",
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
         "-y",
         "-ss", str(start),
         "-to", str(end),
         "-i", str(source),
-        "-filter_complex", filter_complex,
-        "-preset", "veryfast",
-        "-crf", "26",
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+        "-vf", vf,
+        "-af", "asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0,volume=6dB",
+        "-preset", "ultrafast",
+        "-crf", "28",
         "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac",
+        "-ar", "44100",
         "-ac", "2",
+        "-b:a", "192k",
+        "-profile:a", "aac_low",
+        "-shortest",
+        "-threads", "0",
         "-movflags", "+faststart",
         str(output_file),
     ]
@@ -70,17 +83,22 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     clips = data.get("clips") or []
+    total_t0 = time.time()
     for i, clip in enumerate(clips, start=1):
+        ass = subtitle_dir / f"short_{i}.ass"
         srt = subtitle_dir / f"short_{i}.srt"
-        if not srt.exists():
+        subtitle = ass if ass.exists() else srt
+        if not subtitle.exists():
             print(f"Subtitle missing for short_{i}, skipping")
             continue
         output_file = output_dir / f"short_{i}.mp4"
-        print(f"Rendering short_{i}.mp4  {clip['start']}s → {clip['end']}s")
-        render_clip(source, clip["start"], clip["end"], srt, output_file)
-        print(f"Saved {output_file}")
+        dur = round(float(clip.get("end", 0)) - float(clip.get("start", 0)), 1)
+        print(f"Rendering short_{i}.mp4  {clip['start']}s -> {clip['end']}s ({dur}s clip)")
+        t0 = time.time()
+        render_clip(source, clip["start"], clip["end"], subtitle, output_file)
+        print(f"  saved in {time.time() - t0:.1f}s -> {output_file}")
 
-    print(f"✅ Rendered {len(clips)} shorts in one encode each")
+    print(f"✅ Rendered {len(clips)} shorts in {time.time() - total_t0:.1f}s")
 
 
 if __name__ == "__main__":

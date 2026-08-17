@@ -58,6 +58,10 @@ class StatusResponse(BaseModel):
     job_id: str
     status: str
     step: Optional[str] = None
+    step_index: Optional[int] = None
+    step_label: Optional[str] = None
+    progress_percent: Optional[int] = None
+    steps: Optional[list] = None
     error: Optional[str] = None
     result: Optional[dict] = None
     elapsed_seconds: Optional[float] = None

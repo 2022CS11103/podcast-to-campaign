@@ -93,6 +93,28 @@ CANDIDATE_MAX_SECONDS = 60
 # Hard cap on Gemini analysis calls per job (cost control).
 MAX_ANALYZED_CANDIDATES = 12
 
+# Scan stops once this many unique moments look "good enough".
+# Ranker still takes the top unique renders even if some sit below this.
+MIN_OVERALL_SCORE = 60
+
+# Ranker will not keep a clip below this unless it is the only option.
+USABLE_SCORE_FLOOR = 48
+
+# Encode this many unique vertical videos, then copy them onto
+# Shorts / Reels / TikTok. 2 Reels + 1 Short → 2 encodes, not 3.
+MAX_UNIQUE_RENDERS = 3
+
+# Transcribe/score the talk in slices. Stop as soon as enough
+# unique clips clear MIN_OVERALL_SCORE — no need to parse a full hour.
+# 3-minute windows for Gemini candidate grouping.
+# Whisper itself only ever sees 30s slices (Windows RAM).
+SCAN_WINDOW_SECONDS = 180
+WHISPER_SLICE_SECONDS = 15
+CANDIDATES_PER_WINDOW = 3
+# After this much of a long talk, proceed with whatever usable clips
+# we have instead of hunting the remaining 50 minutes.
+MAX_SCAN_SECONDS = 720
+
 # A/B: three hook/caption variants per clip. Variant A ships first;
 # B/C are held for tests or used if A underperforms.
 AB_VARIANT_IDS = ("A", "B", "C")
@@ -112,9 +134,33 @@ def text_platform_keys(plan: dict) -> list:
     return [k for k in plan.keys() if k in TEXT_PLATFORMS]
 
 
+def video_slot_demand(plan: dict) -> int:
+    """How many platform video files to copy (2 Reels + 1 Short = 3)."""
+    total = 0
+    for k in video_platform_keys(plan):
+        try:
+            total += int(plan[k].get("count", 0))
+        except (TypeError, ValueError):
+            pass
+    return total
+
+
 def video_clip_demand(plan: dict) -> int:
-    """How many unique videos we actually need to render."""
-    return sum(int(plan[k].get("count", 0)) for k in video_platform_keys(plan))
+    """
+    Unique ffmpeg renders. One strong moment is copied to Shorts and
+    Reels, so demand is max(platform counts), not the sum.
+    """
+    counts = []
+    for k in video_platform_keys(plan):
+        try:
+            n = int(plan[k].get("count", 0))
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            counts.append(n)
+    if not counts:
+        return 0
+    return min(max(counts), MAX_UNIQUE_RENDERS)
 
 
 def duration_fit(duration_seconds: float, platform: str) -> float:

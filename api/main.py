@@ -24,6 +24,7 @@ from scripts.ai.ab_engine import (
 )
 from config.platform_specs import PLATFORM_SPECS, CANDIDATE_TARGET_SECONDS
 from utils.pipeline_timer import format_duration, snapshot as timing_snapshot
+from utils.pipeline_steps import describe_step
 
 app = FastAPI(title="CreatorOS API")
 
@@ -100,6 +101,10 @@ def connect_stub(platform: str):
 
 @app.post("/process", response_model=ProcessResponse)
 def process_video(req: ProcessRequest):
+    existing = job_manager.active_job()
+    if existing:
+        return ProcessResponse(job_id=existing["job_id"], status=existing["status"])
+
     job_id = job_manager.create_job(req.source)
     enqueue_job(job_id, req.source, req.content_plan, req.brand_context)
     return ProcessResponse(job_id=job_id, status="queued")
@@ -124,10 +129,16 @@ def get_status(job_id: str):
             timing = live
             elapsed = live.get("total_seconds") or elapsed
 
+    ui = describe_step(job["step"], job["status"])
+
     return StatusResponse(
         job_id=job["job_id"],
         status=job["status"],
         step=job["step"],
+        step_index=ui["step_index"],
+        step_label=ui["step_label"],
+        progress_percent=ui["progress_percent"],
+        steps=ui["steps"],
         error=job["error"],
         result=job["result"],
         elapsed_seconds=round(elapsed, 2) if elapsed else 0,

@@ -62,15 +62,10 @@ class VideoAgent(BaseAgent):
         )
 
         self.memory.update(
-            "audio_path",
-            "output/audio.wav"
-        )
-
-        self.memory.update(
             "metadata_path",
             "output/metadata.json"
         )
 
         self.log("Video processing completed.")
 
-        return "output/audio.wav"
+        return input_source

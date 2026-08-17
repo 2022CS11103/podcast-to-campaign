@@ -74,7 +74,6 @@ def _worker():
             for stale_dir in stale_dirs:
                 if stale_dir.exists():
                     shutil.rmtree(stale_dir)
-                stale_dir.mkdir(parents=True, exist_ok=True)
 
             if brand_context:
                 brand_file = PROJECT_ROOT / "brand_context.json"

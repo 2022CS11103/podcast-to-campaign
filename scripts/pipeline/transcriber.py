@@ -5,8 +5,13 @@ import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("MKL_DISABLE_FAST_MM", "1")
 os.environ.setdefault("CT2_USE_EXPERIMENTAL_PACKED_GEMM", "0")
+os.environ.setdefault("CT2_FORCE_CPU_ISA", "GENERIC")
+os.environ.setdefault("ONNXRUNTIME_INTRA_OP_NUM_THREADS", "1")
+os.environ.setdefault("ONNXRUNTIME_INTER_OP_NUM_THREADS", "1")
 
+import gc
 import json
 import sys
 import time
@@ -19,9 +24,9 @@ sys.path.append(str(PROJECT_ROOT))
 
 from utils.cost_tracker import log_whisper_time
 
-# Prefer tiny.en (fast). Fall back if MKL/int8 cannot allocate.
+# float32 first: int8/int8_float32 hits mkl_malloc on this Windows CPU.
 MODEL_CANDIDATES = ("tiny.en", "tiny")
-COMPUTE_CANDIDATES = ("int8_float32", "float32")
+COMPUTE_CANDIDATES = ("float32", "int8_float32")
 
 
 def get_model():
@@ -45,18 +50,45 @@ def get_model():
     raise RuntimeError(f"Could not load Whisper: {last_error}") from last_error
 
 
+def transcribe_wav(model, audio_path):
+    """
+    Transcribe one short wav. Consume the generator immediately so
+    MKL encode errors surface here, not later during iteration.
+    """
+    segments_iter, info = model.transcribe(
+        str(audio_path),
+        beam_size=1,
+        vad_filter=False,
+        word_timestamps=False,
+        condition_on_previous_text=False,
+        without_timestamps=False,
+    )
+    return list(segments_iter), info
+
+
+class WhisperSession:
+    """Allows reloading the model after an MKL allocator crash."""
+
+    def __init__(self):
+        self.model, self.size = get_model()
+
+    def reload(self):
+        print("Reloading Whisper after a memory allocator crash...")
+        try:
+            del self.model
+        except Exception:
+            pass
+        self.model = None
+        gc.collect()
+        self.model, self.size = get_model()
+
+
 def transcribe(audio_path):
     if not Path(audio_path).exists():
         raise FileNotFoundError(f"Audio not found: {audio_path}")
 
     model, model_size = get_model()
-    segments, info = model.transcribe(
-        str(audio_path),
-        beam_size=1,
-        vad_filter=True,
-        word_timestamps=False,
-        condition_on_previous_text=False,
-    )
+    segments, info = transcribe_wav(model, audio_path)
 
     output = []
     full_text = ""

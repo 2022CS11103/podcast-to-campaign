@@ -20,7 +20,8 @@ def download_video(url):
     tmpl = str(input_dir / "video.%(ext)s")
 
     ydl_opts = {
-        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
+        "format": "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b",
+        "format_sort": ["res:1080", "ext:mp4:m4a"],
         "merge_output_format": "mp4",
         "outtmpl": tmpl,
         "quiet": False,
@@ -28,7 +29,7 @@ def download_video(url):
         "retries": 5,
         "fragment_retries": 5,
         "nocheckcertificate": True,
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+        "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:

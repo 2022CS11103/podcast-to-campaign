@@ -30,9 +30,12 @@ class JobManager:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def list_jobs(self):
+    def active_job(self):
         with self._lock:
-            return list(self._jobs.values())
+            for job in self._jobs.values():
+                if job.get("status") in ("queued", "running"):
+                    return job
+        return None
 
 # single shared instance
 job_manager = JobManager()

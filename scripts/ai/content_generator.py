@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from utils.gemini_clients import get_client
+from utils.gemini_clients import generate_content
 from utils.prompt_loader import load_prompt
 from utils.cost_tracker import log_gemini_call
 from config.platform_specs import AB_VARIANT_IDS
@@ -34,8 +34,8 @@ Rules:
 - Caption must match the platform:
   - instagram_reels / tiktok: 80-130 words, line breaks, 8 hashtags at end
   - youtube_shorts: Title / Description / Tags format
-  - linkedin: 500-1200 words, professional, max 3 hashtags
-  - twitter: 5-15 tweet thread, numbered, lead tweet is the hook
+  - linkedin: 150-220 words, professional, max 3 hashtags
+  - twitter: 5-8 tweet thread, numbered, lead tweet is the hook
 - Do not mention A/B testing in the copy.
 
 Platform: {platform}
@@ -77,11 +77,7 @@ def build_brand_prefix(brand):
 
 
 def generate_text(prompt: str, step: str) -> str:
-    client = get_client()
-    response = client.models.generate_content(
-        model="gemini-3.1-flash-lite",
-        contents=prompt,
-    )
+    response = generate_content(prompt)
     log_gemini_call(step, response)
     return response.text
 
@@ -126,26 +122,41 @@ def full_transcript_text():
 
 def generate_pillar(platform: str, brand_prefix: str, transcript: str) -> str:
     prompt = load_prompt(platform)
-    return generate_text(
-        f"{brand_prefix}{prompt}\n\nFull talk transcript:\n{transcript[:18000]}",
-        f"marketing_{platform}",
-    )
+    try:
+        return generate_text(
+            f"{brand_prefix}{prompt}\n\nFull talk transcript:\n{transcript[:8000]}",
+            f"marketing_{platform}",
+        )
+    except Exception as exc:
+        print(f"  pillar {platform} failed after retries ({exc}). Writing a fallback.")
+        excerpt = (transcript or "").strip()[:1200]
+        return (
+            f"# {platform.title()}\n\n"
+            f"{brand_prefix}"
+            f"Draft generated without live model (Gemini was busy).\n\n"
+            f"{excerpt}\n"
+        )
 
 
 def generate_item_variants(item: dict, clip_lookup: dict, brand: dict) -> list:
     chunk_id = item.get("chunk_id")
     clip = clip_lookup.get(chunk_id, {})
     text = clip.get("text") or item.get("summary") or ""
+    fallback_caption = item.get("summary") or ""
+    fallback_hook = item.get("hook") or clip.get("hook") or ""
     prompt = VARIANT_PROMPT.format(
         platform=item.get("assigned_platform", "instagram_reels"),
         brand=json.dumps(brand, indent=2),
         summary=item.get("summary") or clip.get("summary") or "",
-        hook=item.get("hook") or clip.get("hook") or "",
+        hook=fallback_hook,
         text=text[:4000],
     )
-    raw = generate_text(prompt, "marketing_variants")
-    fallback_caption = item.get("summary") or ""
-    return parse_variants(raw, item.get("hook") or "", fallback_caption)
+    try:
+        raw = generate_text(prompt, "marketing_variants")
+        return parse_variants(raw, fallback_hook, fallback_caption)
+    except Exception as exc:
+        print(f"  variants for {item.get('id')} failed ({exc}). Using hook fallback.")
+        return parse_variants("", fallback_hook, fallback_caption)
 
 
 def main():

@@ -14,6 +14,7 @@ from config.platform_specs import (
     PLATFORM_SPECS,
     duration_fit,
     video_clip_demand,
+    video_slot_demand,
 )
 
 VIDEO_PLATFORM_FOLDERS = {
@@ -70,7 +71,7 @@ def clip_video_filename(clips, chunk_id):
     return None
 
 
-def copy_to_platform_folder(source_video: Path, platform: str, filename: str):
+def copy_to_platform_folder(source_video: Path, platform: str, dest_name: str):
     folder_name = VIDEO_PLATFORM_FOLDERS.get(platform)
     if not folder_name:
         return None
@@ -79,9 +80,31 @@ def copy_to_platform_folder(source_video: Path, platform: str, filename: str):
         return None
     dest_dir = PROJECT_ROOT / "output" / folder_name
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = dest_dir / filename
+    dest_path = dest_dir / dest_name
     shutil.copy2(str(source_video), str(dest_path))
     return str(dest_path)
+
+
+def fill_platform_slots(clips, count, platform, used_ids):
+    """
+    Fill the requested count. Prefer unused unique moments first,
+    then reuse (same render, different scheduled post / caption).
+    """
+    if count <= 0 or not clips:
+        return []
+    unused = [c for c in clips if c.get("chunk_id") not in used_ids]
+    reused = [c for c in clips if c.get("chunk_id") in used_ids]
+    unused.sort(key=lambda c: platform_fit_score(c, platform), reverse=True)
+    reused.sort(key=lambda c: platform_fit_score(c, platform), reverse=True)
+    pool = unused + reused
+    selected = [pool[i % len(pool)] for i in range(count)]
+    fresh = min(count, len(unused))
+    copies = count - fresh
+    if copies:
+        print(f"   {platform}: {fresh} unique + {copies} reused copy to fill {count}")
+    else:
+        print(f"   {platform}: {count} unique clip(s)")
+    return selected
 
 
 def empty_performance():
@@ -107,15 +130,15 @@ def main():
     shorts_dir = PROJECT_ROOT / "output" / "final_shorts"
     plan = load_plan(required=True)
     clips = data["clips"]
-    video_needed = video_clip_demand(plan)
+    unique_renders = video_clip_demand(plan)
+    video_needed = video_slot_demand(plan)
 
     used_ids = set()
     items = []
     item_counter = 1
     today = datetime.now()
 
-    # Video platforms consume unique clips (expensive renders).
-    # Text platforms reuse the best remaining / overlapping insights.
+    # Video platforms share the same unique renders (copy, don't re-encode).
     ordered_platforms = [p for p in plan.keys() if p in VIDEO_PLATFORMS]
     ordered_platforms += [p for p in plan.keys() if p not in VIDEO_PLATFORMS]
 
@@ -125,12 +148,11 @@ def main():
         is_video = platform in VIDEO_PLATFORMS
 
         if is_video:
-            candidates = [c for c in clips if c.get("chunk_id") not in used_ids]
+            selected = fill_platform_slots(clips, count, platform, used_ids)
         else:
-            candidates = list(clips)
-
-        candidates.sort(key=lambda c: platform_fit_score(c, platform), reverse=True)
-        selected = candidates[:count]
+            # Text posts reuse the same insights on a calendar — fill the
+            # requested count even if we only found one strong moment.
+            selected = fill_platform_slots(clips, count, platform, set())
 
         for i, clip in enumerate(selected):
             duration = round(
@@ -143,8 +165,9 @@ def main():
 
             platform_video_path = None
             if is_video and video_filename:
+                dest_name = f"{VIDEO_PLATFORM_FOLDERS[platform]}_{i + 1}.mp4"
                 platform_video_path = copy_to_platform_folder(
-                    source_video, platform, video_filename
+                    source_video, platform, dest_name
                 )
 
             spec = PLATFORM_SPECS.get(platform, {})
@@ -176,7 +199,7 @@ def main():
                 "parent_id": None,
             })
 
-            if is_video:
+            if is_video and clip.get("chunk_id") not in used_ids:
                 used_ids.add(clip.get("chunk_id"))
             item_counter += 1
 
@@ -189,7 +212,8 @@ def main():
         "generated_at": today.strftime("%Y-%m-%d %H:%M:%S"),
         "requested_plan": plan,
         "total_requested": sum(int(p.get("count", 0)) for p in plan.values()),
-        "video_renders": video_needed,
+        "video_renders": unique_renders,
+        "video_slots": video_needed,
         "total_allocated": len(items),
         "items": sorted(items, key=lambda x: x["scheduled_date"]),
     }

@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from utils.gemini_clients import get_client
+from utils.gemini_clients import generate_content
 from utils.cost_tracker import log_gemini_call
 from config.platform_specs import platforms_for_duration
 
@@ -43,7 +43,6 @@ Return ONLY valid JSON with keys: summary, hook, scores (hook/education/emotion/
 
 
 def analyze_chunk(text, duration, platforms):
-    client = get_client()
     prompt = (
         PROMPT
         + f"\nClip duration (seconds): {duration}\n"
@@ -51,13 +50,8 @@ def analyze_chunk(text, duration, platforms):
         + "Transcript:\n"
         + text
     )
-    response = client.models.generate_content(
-        model="gemini-3.1-flash-lite",
-        contents=prompt
-    )
-
+    response = generate_content(prompt)
     log_gemini_call("highlight_analysis", response)
-
     return response.text
 
 

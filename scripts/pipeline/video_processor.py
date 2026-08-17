@@ -27,22 +27,6 @@ def extract_metadata(video_path):
     return json.loads(result.stdout)
 
 
-def extract_audio(video_path, output_audio):
-
-    command = [
-        "ffmpeg",
-        "-y",
-        "-i", str(video_path),
-        "-vn",
-        "-acodec", "pcm_s16le",
-        "-ar", "16000",
-        "-ac", "1",
-        str(output_audio)
-    ]
-
-    subprocess.run(command, check=True)
-
-
 def main():
 
     if len(sys.argv) < 2:
@@ -65,12 +49,8 @@ def main():
     with open(metadata_file, "w") as f:
         json.dump(metadata, f, indent=2)
 
-    audio_file = output_dir / "audio.wav"
-
-    extract_audio(video_path, audio_file)
-
     print("Metadata saved:", metadata_file)
-    print("Audio saved:", audio_file)
+    print("Skipping full-talk audio extract — scan cuts 8-min windows from the video.")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from utils.content_plan import load_plan
-from config.platform_specs import video_clip_demand, duration_fit, VIDEO_PLATFORMS
+from config.platform_specs import (
+    video_clip_demand,
+    duration_fit,
+    VIDEO_PLATFORMS,
+    MIN_OVERALL_SCORE,
+    USABLE_SCORE_FLOOR,
+)
 
 
 def overlap_ratio(a, b):
@@ -41,14 +47,12 @@ def ranking_score(clip):
 
 def get_top_k():
     """
-    Render demand = YouTube Shorts + Reels + TikTok counts only.
-    LinkedIn / Twitter / blog reuse those insights as text, so they
-    must not inflate how many videos we cut (that's the expensive part).
+    Unique renders = max(Shorts, Reels, TikTok), capped.
+    Router copies those files onto every requested video platform.
     """
     plan = load_plan(required=True)
     video_needed = video_clip_demand(plan)
     if video_needed <= 0:
-        # Text-only campaign: still pick a few highlight clips as source material.
         total = 0
         for config in plan.values():
             if isinstance(config, dict):
@@ -56,9 +60,31 @@ def get_top_k():
                     total += int(config.get("count", 0))
                 except (TypeError, ValueError):
                     pass
-        return max(1, min(total, 4))
-    # Small buffer so the router can pick by platform-fit without running dry.
+        return max(1, min(total, 3))
     return video_needed
+
+
+def pick_clips(ranked, needed):
+    """Take the best unique moments. Soft floor, not a hard 72 veto."""
+    usable = [
+        c for c in ranked
+        if float(c.get("overall_score") or 0) >= USABLE_SCORE_FLOOR
+    ]
+    if usable:
+        chosen = usable[:needed]
+        print(
+            f"Ranker: {len(usable)} clips >= {USABLE_SCORE_FLOOR}, "
+            f"rendering top {len(chosen)} unique (asked {needed})."
+        )
+        return chosen
+    if ranked:
+        print(
+            f"Ranker: none reached {USABLE_SCORE_FLOOR}. "
+            f"Keeping the single best (score {ranked[0].get('overall_score')})."
+        )
+        return ranked[:1]
+    print("Ranker: no scored clips at all.")
+    return []
 
 
 def main():
@@ -81,7 +107,9 @@ def main():
     )
 
     ranked = remove_time_overlap(ranked)
-    top_clips = ranked[:top_k]
+    strong = [c for c in ranked if float(c.get("overall_score") or 0) >= MIN_OVERALL_SCORE]
+    print(f"Scan quality: {len(strong)} clips >= {MIN_OVERALL_SCORE} (early-stop bar).")
+    top_clips = pick_clips(ranked, top_k)
 
     output = {
         "total_selected": len(top_clips),
