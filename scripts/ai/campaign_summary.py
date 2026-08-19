@@ -74,7 +74,9 @@ def main():
         "step_timings": timing.get("steps", []),
         "unit_economics": cost_report.get("unit_economics"),
         "scan": scan,
-        "analysis_mode": "audio_first",
+        "analysis_mode": (
+            "audio_visual" if scan.get("visual_analysis") else scan.get("analysis_mode") or "audio_first"
+        ),
     }
 
     # human-readable markdown version
@@ -100,7 +102,7 @@ def main():
             f"- Covered **{scanned}s** of **{source}s**"
             f"{' and stopped early' if scan.get('stopped_early') else ''}"
         )
-        lines.append(f"- Analysis mode: audio-first (visual scoring next)\n")
+        lines.append(f"- Analysis mode: {summary.get('analysis_mode') or 'audio_first'}\n")
     lines.append(f"## Timing")
     lines.append(f"- **Total campaign time:** {summary['processing_human']}")
     for step in summary.get("step_timings") or []:

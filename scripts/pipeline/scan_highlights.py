@@ -26,6 +26,7 @@ from config.platform_specs import (
     WHISPER_SLICE_SECONDS,
     CANDIDATES_PER_WINDOW,
     MAX_SCAN_SECONDS,
+    VIDEO_ANALYSIS_ENABLED,
     video_clip_demand,
     largest_video_count,
 )
@@ -34,6 +35,13 @@ from utils.cost_tracker import log_whisper_time
 from scripts.pipeline.transcribe_backend import transcribe_wav_file
 from scripts.pipeline.chunk_transcript import build_candidates, nms_windows
 from scripts.pipeline.clean_transcript import clean_text
+from scripts.pipeline.visual_energy import (
+    scan_video_window,
+    wav_rms_series,
+    merge_audio,
+    score_span,
+    heuristic_boost,
+)
 from scripts.ai.clip_intelligence import score_chunk
 from scripts.ai.clip_ranker import ranking_score, remove_time_overlap
 
@@ -112,20 +120,35 @@ def extract_window(video: Path, start: float, duration: float, dest: Path):
 
 def transcribe_slice(video, start, duration, wav):
     extract_window(video, start, duration, wav)
-    return collect_segments(wav, start, duration)
+    rms = wav_rms_series(wav, start, hop=0.5) if VIDEO_ANALYSIS_ENABLED else []
+    return collect_segments(wav, start, duration), rms
 
 
 def transcribe_window(video, start, duration, wav):
     """Whisper/Gemini never sees more than WHISPER_SLICE_SECONDS of audio."""
     segments = []
+    rms = []
     offset = 0.0
     while offset < duration - 0.05:
         slice_dur = min(WHISPER_SLICE_SECONDS, duration - offset)
         print(f"  transcribe {start + offset:.0f}s -> {start + offset + slice_dur:.0f}s")
-        segments.extend(transcribe_slice(video, start + offset, slice_dur, wav))
+        segs, slice_rms = transcribe_slice(video, start + offset, slice_dur, wav)
+        segments.extend(segs)
+        rms.extend(slice_rms)
         gc.collect()
         offset += slice_dur
-    return segments
+    return segments, rms
+
+
+def watch_window(video, start, duration):
+    if not VIDEO_ANALYSIS_ENABLED:
+        return []
+    try:
+        print(f"  watching picture {start:.0f}s -> {start + duration:.0f}s")
+        return scan_video_window(video, start, duration)
+    except Exception as exc:
+        print(f"  visual scan skipped: {exc}")
+        return []
 
 
 def good_clips(results):
@@ -150,8 +173,9 @@ def score_window(to_score):
             cand = to_score[i]
             print(
                 f"  scored clip @ {cand['start']}s "
-                f"(heuristic {cand.get('heuristic_score')}) "
-                f"-> {scored[i].get('overall_score')}"
+                f"(heuristic {cand.get('heuristic_score')}, "
+                f"visual {cand.get('visual_score')}, audio {cand.get('audio_energy')}) "
+                f"-> {scored[i].get('overall_score')} ({scored[i].get('highlight_reason')})"
             )
     return scored
 
@@ -175,7 +199,8 @@ def main():
     print(
         f"Scan-until-good: need {needed} distinct clips >= {MIN_OVERALL_SCORE} "
         f"(stop after {MAX_SCAN_SECONDS}s if {largest}+ highlights exist). "
-        f"Video {duration:.0f}s, window {SCAN_WINDOW_SECONDS}s."
+        f"Video {duration:.0f}s, window {SCAN_WINDOW_SECONDS}s, "
+        f"mode={'audio+visual' if VIDEO_ANALYSIS_ENABLED else 'audio'}."
     )
 
     engine = "whisper-isolated"
@@ -192,14 +217,33 @@ def main():
         wav = OUTPUT / "scan_window.wav"
         print(f"\nScanning {start:.0f}s -> {start + window:.0f}s ...")
         w0 = time.time()
-        new_segments = transcribe_window(video, start, window, wav)
+        if VIDEO_ANALYSIS_ENABLED:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                talk = pool.submit(transcribe_window, video, start, window, wav)
+                watch = pool.submit(watch_window, video, start, window)
+                new_segments, rms_series = talk.result()
+                visual_samples = watch.result()
+        else:
+            new_segments, rms_series = transcribe_window(video, start, window, wav)
+            visual_samples = []
         log_whisper_time(time.time() - w0)
         gc.collect()
 
         all_segments.extend(new_segments)
         scanned = start + window
 
+        energy_map = merge_audio(visual_samples, rms_series)
         raw = build_candidates(new_segments)
+        for cand in raw:
+            energy = score_span(energy_map, cand["start"], cand["end"])
+            cand["visual_score"] = energy["visual_score"]
+            cand["audio_energy"] = energy["audio_energy"]
+            cand["visual_signals"] = energy["visual_signals"]
+            cand["highlight_reason"] = energy["highlight_reason"]
+            cand["heuristic_score"] = round(
+                float(cand.get("heuristic_score") or 0) + heuristic_boost(energy),
+                2,
+            )
         window_chunks = nms_windows(raw)
         window_chunks = sorted(
             window_chunks,
@@ -245,6 +289,7 @@ def main():
         "transcript": transcript,
         "segments": all_segments,
         "whisper_model": engine,
+        "analysis_mode": "audio_visual" if VIDEO_ANALYSIS_ENABLED else "audio_first",
         "scan": {
             "stopped_early": stopped_early,
             "scanned_seconds": round(scanned, 1),
@@ -252,6 +297,7 @@ def main():
             "min_score": MIN_OVERALL_SCORE,
             "usable_floor": USABLE_SCORE_FLOOR,
             "needed": needed,
+            "visual_analysis": VIDEO_ANALYSIS_ENABLED,
         },
     }
     write_json(OUTPUT / "transcript.json", payload)
@@ -272,6 +318,7 @@ def main():
         "results": all_analysis,
         "scan_complete": True,
         "stopped_early": stopped_early,
+        "analysis_mode": "audio_visual" if VIDEO_ANALYSIS_ENABLED else "audio_first",
     })
 
     print(

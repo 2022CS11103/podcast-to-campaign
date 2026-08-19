@@ -19,6 +19,9 @@ def _run(args, cwd=PROJECT_ROOT):
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
+        marker = "YouTube blocked this download"
+        if marker in detail:
+            raise RuntimeError(detail[detail.rfind(marker):].strip()[:1200])
         cmd = " ".join(str(a) for a in args)
         raise RuntimeError(f"{cmd}\n{detail[-2500:]}")
     if result.stdout:
@@ -37,12 +40,12 @@ class VideoAgent(BaseAgent):
         self.log("Starting video processing...")
 
         if str(input_source).startswith("http://") or str(input_source).startswith("https://"):
-
+            # One argv: playlist query strings contain &, which a shell would split.
             _run(
                 [
                     self.python,
                     "scripts/pipeline/download_video.py",
-                    input_source
+                    str(input_source).strip(),
                 ]
             )
 

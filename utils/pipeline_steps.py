@@ -2,10 +2,10 @@
 
 UI_STEPS = [
     {"id": "video", "index": 1, "label": "Ingesting the talk"},
-    {"id": "transcript", "index": 2, "label": "Listening for standout moments"},
+    {"id": "transcript", "index": 2, "label": "Watching and listening for standout moments"},
     {"id": "highlight", "index": 3, "label": "Editor scoring hooks"},
     {"id": "ranking", "index": 4, "label": "Picking distinct Shorts vs Reels"},
-    {"id": "editing", "index": 5, "label": "Cutting vertical edits"},
+    {"id": "editing", "index": 5, "label": "Directing cuts, zooms, and captions"},
     {"id": "routing", "index": 6, "label": "Routing to each platform"},
     {"id": "marketing", "index": 7, "label": "Writing captions like a strategist"},
     {"id": "planning", "index": 8, "label": "Building the posting calendar"},

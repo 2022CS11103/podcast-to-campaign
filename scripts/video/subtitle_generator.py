@@ -8,8 +8,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
 # Keep captions small so the speaker stays visible.
-MAX_WORDS_PER_CUE = 5
-MAX_CUE_SECONDS = 2.4
+MAX_WORDS_PER_CUE = 4
+MAX_CUE_SECONDS = 2.0
 
 
 def ass_time(seconds):

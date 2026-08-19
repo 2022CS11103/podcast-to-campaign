@@ -5,7 +5,10 @@ youtube-transcript-api
 fastapi
 uvicorn[standard]
 python-multipart
-yt-dlp
+yt-dlp[default]
+google-api-python-client
+google-auth-oauthlib
+cryptography
 faster-whisper
 opencv-python
 ultralytics<8.4

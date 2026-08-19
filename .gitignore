@@ -1,5 +1,8 @@
 # Environment & secrets
 .env
+cookies.txt
+youtube_cookies.txt
+data/
 
 # Generated outputs
 output/

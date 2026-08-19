@@ -63,6 +63,16 @@
       background: linear-gradient(90deg, var(--accent), #4f7cff);
     }
     button.primary:disabled { opacity: .5; cursor: wait; }
+    button.secondary, a.secondary {
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+      background: #0b0e16; color: var(--text); cursor: pointer;
+      text-decoration: none; font-weight: 600;
+    }
+    button.secondary:disabled { opacity: .5; cursor: wait; }
+    .account-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .account-status { color: var(--muted); font-size: 13px; flex: 1; min-width: 220px; }
+    .account-status.connected { color: var(--accent-2); }
     .hint { color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.45; }
     .steps { display: grid; gap: 8px; }
     .step { display: flex; gap: 10px; align-items: center; font-size: 13.5px; color: var(--muted); }
@@ -101,7 +111,7 @@
     <div class="brand">CREATOR<span>OS</span> STUDIO</div>
     <div class="chips">
       <span class="chip on">Audio analysis live</span>
-      <span class="chip wait">Visual analysis next</span>
+      <span class="chip on">Visual analysis live</span>
       <span class="chip on">15-min early stop</span>
       <span class="chip on">Distinct Shorts ≠ Reels</span>
     </div>
@@ -109,9 +119,9 @@
   <main>
     <h1>Cut like an editor. Stop when the package is done.</h1>
     <p class="lede">
-      Shorts and Reels get different opening moments when the talk has them.
-      The desk listens in slices and quits in the first 15 minutes once enough
-      clips clear the bar — no full-hour grind. Picture-and-audio scoring comes next.
+      The desk watches the picture and listens at the same time — motion, scene
+      changes, loud beats, plus the words. Shorts and Reels get different openings
+      when the talk has them. Scan quits in the first 15 minutes once the package is strong.
     </p>
 
     <div class="grid">
@@ -129,7 +139,7 @@
           <div><label>Audience</label><input id="audience" value="Startup Founders" /></div>
         </div>
         <button class="primary" id="go">Generate campaign</button>
-        <p class="hint">Ask for 3 Reels. If three strong cuts appear in the opening 15 minutes, the rest of the talk is skipped.</p>
+        <p class="hint">Paste a YouTube URL, or a local path to an .mp4 if YouTube blocks the download. If YouTube asks you to sign in, open Firefox, log into youtube.com, then generate again (Chrome can stay open).</p>
       </section>
       <section class="card">
         <div id="statusLabel">Waiting for a talk</div>
@@ -137,6 +147,16 @@
         <div class="steps" id="steps"></div>
       </section>
     </div>
+
+    <section class="card scan">
+      <div class="account-row">
+        <div id="youtubeStatus" class="account-status">Checking YouTube connection…</div>
+        <a id="youtubeConnect" class="secondary" href="/connect/youtube">Connect YouTube</a>
+        <button id="youtubeUpload" class="secondary" hidden>Upload first Short privately</button>
+        <button id="youtubeDisconnect" class="secondary" hidden>Disconnect</button>
+      </div>
+      <div id="youtubeMessage" class="hint">Uploads default to Private while the app is in testing.</div>
+    </section>
 
     <div class="kpis" id="kpis" hidden>
       <div class="kpi"><b id="kPieces">0</b><small>content pieces</small></div>
@@ -155,10 +175,10 @@
     const API = "";
     const STEPS = [
       "Ingesting the talk",
-      "Listening for standout moments",
+      "Watching and listening for standout moments",
       "Editor scoring hooks",
       "Picking distinct Shorts vs Reels",
-      "Cutting vertical edits",
+      "Directing cuts, zooms, and captions",
       "Routing to each platform",
       "Writing captions like a strategist",
       "Building the posting calendar",
@@ -203,9 +223,74 @@
       const source = Math.round(scan.source_seconds || 0);
       const mins = Math.max(1, Math.round(scanned / 60));
       if (scan.stopped_early) {
-        return `Editor stop: listened to ${mins} min of a ${Math.round(source / 60) || "?"} min talk, found ${scan.needed || "enough"} strong moments, skipped the rest.`;
+        return `Editor stop: watched and listened to ${mins} min of a ${Math.round(source / 60) || "?"} min talk, found ${scan.needed || "enough"} strong moments, skipped the rest.`;
       }
-      return `Listened through ${mins} min (${scanned}s of ${source}s).`;
+      return `Watched and listened through ${mins} min (${scanned}s of ${source}s).`;
+    }
+
+    async function loadAccounts() {
+      const status = document.getElementById("youtubeStatus");
+      const connect = document.getElementById("youtubeConnect");
+      const upload = document.getElementById("youtubeUpload");
+      const disconnect = document.getElementById("youtubeDisconnect");
+      try {
+        const res = await fetch(API + "/accounts");
+        const data = await res.json();
+        const youtube = (data.accounts || []).find((a) => a.platform === "youtube") || {};
+        if (youtube.connected) {
+          status.textContent = "YouTube connected — ready to upload approved Shorts";
+          status.className = "account-status connected";
+          connect.hidden = true;
+          upload.hidden = false;
+          disconnect.hidden = false;
+        } else {
+          status.textContent = youtube.status === "not_configured"
+            ? "YouTube OAuth is not configured on the server"
+            : (youtube.error || "YouTube not connected");
+          status.className = "account-status";
+          connect.hidden = false;
+          upload.hidden = true;
+          disconnect.hidden = true;
+        }
+      } catch (err) {
+        status.textContent = "Could not read YouTube connection status";
+      }
+    }
+
+    document.getElementById("youtubeUpload").onclick = async () => {
+      const btn = document.getElementById("youtubeUpload");
+      const msg = document.getElementById("youtubeMessage");
+      btn.disabled = true;
+      msg.textContent = "Uploading the first YouTube Short privately…";
+      try {
+        const res = await fetch(API + "/youtube/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ privacy_status: "private", made_for_kids: false }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Upload failed");
+        msg.innerHTML = `Uploaded privately: <a href="${data.url}" target="_blank" rel="noreferrer">${data.url}</a>`;
+      } catch (err) {
+        msg.textContent = err.message || "YouTube upload failed";
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById("youtubeDisconnect").onclick = async () => {
+      await fetch(API + "/disconnect/youtube", { method: "POST" });
+      document.getElementById("youtubeMessage").textContent = "YouTube disconnected.";
+      loadAccounts();
+    };
+
+    const youtubeResult = new URLSearchParams(location.search).get("youtube");
+    if (youtubeResult === "connected") {
+      document.getElementById("youtubeMessage").textContent = "YouTube connected successfully.";
+      history.replaceState({}, "", location.pathname);
+    } else if (youtubeResult === "denied") {
+      document.getElementById("youtubeMessage").textContent = "YouTube permission was denied.";
+      history.replaceState({}, "", location.pathname);
     }
 
     async function poll(jobId) {
@@ -245,7 +330,11 @@
       const scanCard = document.getElementById("scanCard");
       if (scanText) {
         scanCard.hidden = false;
-        document.getElementById("scanNote").textContent = scanText + " Audio-first today. Visual energy scoring is next.";
+        document.getElementById("scanNote").textContent = scanText + (
+          (data.analysis_mode === "audio_visual" || (data.scan || {}).visual_analysis)
+            ? " Scoring mixes words, loud beats, and on-screen energy."
+            : " Audio-first scoring."
+        );
       }
       if (jobId) {
         document.getElementById("download").innerHTML =
@@ -282,7 +371,7 @@
             <h3>${item.display_hook || item.hook || "Untitled"}</h3>
             ${media}
             <p class="note">${body}</p>
-            <small class="note">${item.scheduled_date || ""} · ${item.duration_seconds || 0}s · ${item.display_angle || item.content_angle || ""}${also ? " · also cut for " + also : ""}</small>
+            <small class="note">${item.scheduled_date || ""} · ${item.duration_seconds || 0}s · ${item.display_angle || item.content_angle || ""}${item.highlight_reason ? " · " + item.highlight_reason : ""}${also ? " · also cut for " + also : ""}</small>
           `;
           lane.appendChild(card);
         });
@@ -332,6 +421,7 @@
       }
     };
 
+    loadAccounts();
     loadBoard();
   </script>
 </body>

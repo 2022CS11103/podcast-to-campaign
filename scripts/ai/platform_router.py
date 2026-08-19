@@ -269,6 +269,10 @@ def main():
                 "parent_id": None,
                 "reused_render": reused,
                 "editor_note": editor_note(clip, platform, reused),
+                "word_score": clip.get("word_score"),
+                "visual_score": clip.get("visual_score"),
+                "audio_energy": clip.get("audio_energy"),
+                "highlight_reason": clip.get("highlight_reason"),
             })
 
             if is_video and clip.get("chunk_id") not in used_ids:

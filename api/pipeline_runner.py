@@ -16,6 +16,24 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 task_queue = queue.Queue()
 
+
+def _public_error(exc: Exception) -> str:
+    text = str(exc)
+    lowered = text.lower()
+    bot = "not a bot" in lowered or "sign in to confirm" in lowered or "bot check" in lowered
+    locked = "could not copy chrome cookie database" in lowered
+    if bot or locked:
+        marker = "YouTube blocked this download"
+        if marker in text:
+            return text[text.rfind(marker):].strip()[:1200]
+        return (
+            "YouTube blocked the download (bot check). "
+            "Open Firefox, log into youtube.com, then Try Again. "
+            "Keep Firefox open — Chrome/Edge can stay open. "
+            "Chrome/Edge cookies cannot be read on Windows while those browsers are running."
+        )
+    return text
+
 INTERMEDIATE_DIRS = [
     "shorts",
     "tracking",
@@ -164,7 +182,7 @@ def _worker():
             job_manager.update(
                 job_id,
                 status="failed",
-                error=str(e),
+                error=_public_error(e),
                 timing=timing,
                 finished_at=time.time(),
             )

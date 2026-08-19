@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import time
@@ -12,6 +12,7 @@ from api.schemas import (
     PerformanceRequest,
     RepostRequest,
     RecommendPlanRequest,
+    YouTubeUploadRequest,
 )
 from api.job_manager import job_manager
 from api.pipeline_runner import start_worker, enqueue_job
@@ -26,6 +27,14 @@ from scripts.ai.ab_engine import (
 from config.platform_specs import PLATFORM_SPECS, CANDIDATE_TARGET_SECONDS
 from utils.pipeline_timer import format_duration, snapshot as timing_snapshot
 from utils.pipeline_steps import describe_step
+from utils.youtube_oauth import (
+    authorization_url as youtube_authorization_url,
+    configured as youtube_oauth_configured,
+    connection_status as youtube_connection_status,
+    disconnect as disconnect_youtube,
+    exchange_callback as exchange_youtube_callback,
+    upload_video as upload_youtube_video,
+)
 
 app = FastAPI(title="CreatorOS API")
 
@@ -46,7 +55,6 @@ MEDIA_FOLDERS = {
 }
 
 DISCONNECTED_ACCOUNTS = [
-    {"platform": "youtube", "label": "YouTube", "status": "not_connected", "connected": False},
     {"platform": "instagram", "label": "Instagram", "status": "not_connected", "connected": False},
     {"platform": "linkedin", "label": "LinkedIn", "status": "not_connected", "connected": False},
     {"platform": "twitter", "label": "Twitter/X", "status": "not_connected", "connected": False},
@@ -212,17 +220,25 @@ def campaign_board():
         "video_renders": bank.get("video_renders"),
         "videos_ready": videos_ready,
         "scan": scan,
-        "analysis_mode": summary.get("analysis_mode") or "audio_first",
+        "analysis_mode": summary.get("analysis_mode") or (
+            "audio_visual" if scan.get("visual_analysis") else "audio_first"
+        ),
         "items": items,
     }
 
 
 def _accounts_payload():
+    youtube = youtube_connection_status()
+    accounts = [youtube, *DISCONNECTED_ACCOUNTS]
     return {
-        "accounts": DISCONNECTED_ACCOUNTS,
-        "connected": False,
+        "accounts": accounts,
+        "connected": any(account.get("connected") for account in accounts),
         "can_skip": True,
-        "message": "No accounts linked. Skip and generate a downloadable campaign package.",
+        "message": (
+            "YouTube connected. You can upload an approved Short."
+            if youtube.get("connected")
+            else "No accounts linked. Connect YouTube or generate a downloadable campaign package."
+        ),
     }
 
 
@@ -241,16 +257,122 @@ def skip_connect():
     return {"status": "skipped", "can_continue": True, **_accounts_payload()}
 
 
+@app.get("/connect/youtube")
+def connect_youtube():
+    if not youtube_oauth_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Google OAuth is not configured. Check GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.",
+        )
+    try:
+        return RedirectResponse(youtube_authorization_url(), status_code=302)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/oauth/youtube/callback")
+def youtube_callback(code: str = "", state: str = "", error: str = ""):
+    if error:
+        return RedirectResponse("/studio?youtube=denied", status_code=302)
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Google callback is missing code or state.")
+    try:
+        exchange_youtube_callback(code, state)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return RedirectResponse("/studio?youtube=connected", status_code=302)
+
+
+@app.post("/disconnect/youtube")
+def youtube_disconnect():
+    disconnect_youtube()
+    return {"status": "disconnected", **_accounts_payload()}
+
+
+def _youtube_upload_item(item_id: str = None):
+    if not CONTENT_BANK.exists():
+        raise HTTPException(status_code=404, detail="Generate a campaign before uploading.")
+    with open(CONTENT_BANK, "r", encoding="utf-8") as f:
+        bank = json.load(f)
+    candidates = [
+        item for item in bank.get("items", [])
+        if item.get("assigned_platform") == "youtube_shorts"
+    ]
+    if item_id:
+        candidates = [item for item in candidates if item.get("id") == item_id]
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No matching YouTube Short found.")
+    return bank, candidates[0]
+
+
+def _approved_youtube_path(item: dict) -> Path:
+    raw = item.get("platform_video_file") or item.get("video_file")
+    if not raw:
+        raise HTTPException(status_code=404, detail="This item has no rendered video.")
+    path = Path(raw)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    path = path.resolve()
+    output_root = (PROJECT_ROOT / "output").resolve()
+    try:
+        path.relative_to(output_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Only rendered campaign files can be uploaded.")
+    if not path.exists() or path.suffix.lower() != ".mp4":
+        raise HTTPException(status_code=404, detail="Rendered MP4 is missing.")
+    return path
+
+
+@app.post("/youtube/upload")
+def youtube_upload(req: YouTubeUploadRequest):
+    status = youtube_connection_status()
+    if not status.get("connected"):
+        raise HTTPException(status_code=401, detail="Connect YouTube before uploading.")
+    bank, item = _youtube_upload_item(req.item_id)
+    path = _approved_youtube_path(item)
+    variants = item.get("variants") or []
+    active = next(
+        (variant for variant in variants if variant.get("id") == item.get("active_variant", "A")),
+        variants[0] if variants else {},
+    )
+    hook = active.get("hook") or item.get("hook") or path.stem
+    title = hook if "#shorts" in hook.lower() else f"{hook} #Shorts"
+    description = active.get("caption") or item.get("summary") or ""
+    try:
+        result = upload_youtube_video(
+            path,
+            title=title,
+            description=description,
+            privacy_status=req.privacy_status,
+            made_for_kids=req.made_for_kids,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"YouTube upload failed: {exc}")
+
+    for row in bank.get("items", []):
+        if row.get("id") == item.get("id"):
+            row["status"] = "posted"
+            row["platform_post_id"] = result["video_id"]
+            row["platform_post_url"] = result["url"]
+            row["posted_at"] = result["uploaded_at"]
+            break
+    with open(CONTENT_BANK, "w", encoding="utf-8") as f:
+        json.dump(bank, f, indent=2, ensure_ascii=False)
+    return {"status": "uploaded", "item_id": item.get("id"), **result}
+
+
 @app.get("/connect/{platform}")
 @app.post("/connect/{platform}")
 def connect_stub(platform: str):
-    return {
-        "status": "not_connected",
-        "platform": platform,
-        "connected": False,
-        "can_skip": True,
-        "message": "OAuth is not enabled yet. Skip and continue — Generate works with zero accounts.",
-    }
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            f"{platform} OAuth is not implemented yet. "
+            "Do not mark this account connected; the user can skip this platform."
+        ),
+    )
 
 
 @app.post("/process", response_model=ProcessResponse)

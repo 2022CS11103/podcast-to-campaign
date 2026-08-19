@@ -108,13 +108,12 @@ MAX_UNIQUE_RENDERS = 5
 # unique clips clear MIN_OVERALL_SCORE — no need to parse a full hour.
 SCAN_WINDOW_SECONDS = 180
 WHISPER_SLICE_SECONDS = 15
-CANDIDATES_PER_WINDOW = 3
 # First 15 minutes is enough if we already have the requested highlights.
 MAX_SCAN_SECONDS = 900
 
-# Audio-first today. Visual (face, B-roll, silence, on-screen energy)
-# lands next — keep this False until the studio board is the source of truth.
-VIDEO_ANALYSIS_ENABLED = False
+# Picture + sound energy during scan (cheap 2 fps, not full-video YOLO).
+VIDEO_ANALYSIS_ENABLED = True
+CANDIDATES_PER_WINDOW = 4
 
 # A/B: three hook/caption variants per clip. Variant A ships first;
 # B/C are held for tests or used if A underperforms.

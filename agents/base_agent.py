@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ class BaseAgent(ABC):
         print(f"[{self.__class__.__name__}] {message}")
 
     def run_script(self, *args):
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
         result = subprocess.run(
             [PYTHON, *args],
             cwd=PROJECT_ROOT,
@@ -28,6 +30,7 @@ class BaseAgent(ABC):
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=env,
         )
         if result.stdout:
             print(result.stdout)

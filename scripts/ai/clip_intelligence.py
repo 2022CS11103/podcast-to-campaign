@@ -10,7 +10,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from utils.gemini_clients import generate_content
 from utils.cost_tracker import log_gemini_call
-from config.platform_specs import platforms_for_duration
+from config.platform_specs import platforms_for_duration, VIDEO_ANALYSIS_ENABLED
+from scripts.pipeline.visual_energy import fuse_editor_score, highlight_reason
 
 PROMPT = """
 You are an expert content strategist, YouTube growth expert, and podcast editor.
@@ -87,9 +88,9 @@ def score_chunk(chunk):
     analysis = parse_analysis(raw)
 
     if analysis.get("starts_mid_thought"):
-        analysis["overall_score"] = max(0, int(analysis.get("overall_score", 0)) - 20)
+        analysis["overall_score"] = max(10, int(analysis.get("overall_score", 0)) - 12)
     if analysis.get("payoff_arrives") is False:
-        analysis["overall_score"] = max(0, int(analysis.get("overall_score", 0)) - 15)
+        analysis["overall_score"] = max(10, int(analysis.get("overall_score", 0)) - 10)
 
     analysis["start"] = chunk["start"]
     analysis["end"] = chunk["end"]
@@ -99,6 +100,22 @@ def score_chunk(chunk):
     analysis["target_duration"] = chunk.get("target_duration")
     analysis["fits_platforms"] = platforms
     analysis["text"] = chunk["text"]
+    analysis["visual_score"] = chunk["visual_score"] if "visual_score" in chunk else None
+    analysis["audio_energy"] = chunk["audio_energy"] if "audio_energy" in chunk else None
+    analysis["visual_signals"] = chunk.get("visual_signals") or {}
+    analysis["word_score"] = analysis.get("overall_score")
+    analysis["overall_score"] = fuse_editor_score(
+        analysis.get("word_score"),
+        analysis.get("audio_energy"),
+        analysis.get("visual_score"),
+        enabled=VIDEO_ANALYSIS_ENABLED,
+    )
+    analysis["highlight_reason"] = highlight_reason(
+        analysis.get("word_score"),
+        analysis.get("audio_energy"),
+        analysis.get("visual_score"),
+        analysis.get("visual_signals"),
+    )
     return analysis
 
 

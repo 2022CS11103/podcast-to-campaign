@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, model_validator
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Literal
 
 
 def _pick(data: dict, *keys):
@@ -85,6 +85,13 @@ class RepostRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
     platform: Optional[str] = None
     days: Optional[int] = None
+
+
+class YouTubeUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    item_id: Optional[str] = None
+    privacy_status: Literal["private", "unlisted", "public"] = "private"
+    made_for_kids: bool = False
 
 
 class RecommendPlanRequest(BaseModel):

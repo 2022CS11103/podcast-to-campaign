@@ -54,6 +54,7 @@ def main():
             "newsletter": exists("newsletter.md"),
             "calendar": exists("campaign_calendar.md"),
             "strategy_brief": exists("strategy_brief.txt"),
+            "edit_plans": exists("edit_plans.json"),
             "content_bank": exists("content_bank.json"),
             "campaign_summary": exists("campaign_summary.json"),
             "cost_report": exists("cost_report.json"),

@@ -30,13 +30,14 @@ Return ONLY valid JSON, no markdown:
 
 Rules:
 - Variant A ships first. B and C are held for A/B tests.
-- Hook is on-screen text, not the caption.
+- Hook is on-screen text for the edited Short (max 8 words). Match the jump-cut, not the full talk.
+- Caption must sell THIS clip's moment. The video already has punch-in zooms and captions.
 - Caption must match the platform:
   - instagram_reels / tiktok: 80-130 words, line breaks, 8 hashtags at end
   - youtube_shorts: Title / Description / Tags format
-  - linkedin: 150-220 words, professional, max 3 hashtags
+  - linkedin: 150-220 words, professional, max 3 hashtags. Open with the same hook as the cut.
   - twitter: 5-8 tweet thread, numbered, lead tweet is the hook
-- Do not mention A/B testing in the copy.
+- Do not mention A/B testing, AI, or "we clipped this from a podcast".
 
 Platform: {platform}
 Brand context:

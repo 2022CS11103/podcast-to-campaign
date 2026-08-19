@@ -23,7 +23,7 @@ def overlap_ratio(a, b):
     return inter / union if union else 0.0
 
 
-def remove_time_overlap(results, iou_threshold=0.45):
+def remove_time_overlap(results, iou_threshold=0.55):
     """Keep the higher-scoring clip when two windows cover the same moment."""
     unique = []
     for clip in results:
@@ -65,16 +65,27 @@ def get_top_k():
     return video_needed
 
 
+def _energy(clip):
+    a = clip.get("audio_energy")
+    v = clip.get("visual_score")
+    if a is None and v is None:
+        return 0.0
+    a = 50.0 if a is None else float(a)
+    v = 50.0 if v is None else float(v)
+    return 0.55 * a + 0.45 * v
+
+
 def pick_clips(ranked, needed):
-    """Take the best unique moments. Soft floor, not a hard 72 veto."""
+    """Take the best unique moments. Hot picture/sound can fill remaining slots."""
     usable = [
         c for c in ranked
         if float(c.get("overall_score") or 0) >= USABLE_SCORE_FLOOR
+        or _energy(c) >= 72
     ]
     if usable:
         chosen = usable[:needed]
         print(
-            f"Ranker: {len(usable)} clips >= {USABLE_SCORE_FLOOR}, "
+            f"Ranker: {len(usable)} clips usable or energy-hot, "
             f"rendering top {len(chosen)} unique (asked {needed})."
         )
         return chosen
@@ -130,7 +141,8 @@ def main():
         print(
             f"""
 Chunk: {clip['chunk_id']}
-Score: {clip.get('overall_score')}  rank={ranking_score(clip):.1f}
+Score: {clip.get('overall_score')}  rank={ranking_score(clip):.1f}  words={clip.get('word_score')}  visual={clip.get('visual_score')}  audio={clip.get('audio_energy')}
+Why: {clip.get('highlight_reason')}
 Time: {clip['start']}s -> {clip['end']}s  ({duration}s)
 Hook: {clip.get('hook')}
 """
