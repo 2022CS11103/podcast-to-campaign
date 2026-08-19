@@ -29,7 +29,7 @@ KEY_FILE = DATA_DIR / ".oauth_key"
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
 _state_lock = threading.Lock()
-_oauth_states: set[str] = set()
+_oauth_states: dict[str, str | None] = {}
 
 
 def _settings() -> dict:
@@ -61,9 +61,15 @@ def _client_config() -> dict:
     }
 
 
-def _flow(state: str | None = None) -> Flow:
+def _flow(state: str | None = None, code_verifier: str | None = None) -> Flow:
     cfg = _settings()
-    flow = Flow.from_client_config(_client_config(), scopes=SCOPES, state=state)
+    flow = Flow.from_client_config(
+        _client_config(),
+        scopes=SCOPES,
+        state=state,
+        code_verifier=code_verifier,
+        autogenerate_code_verifier=code_verifier is None,
+    )
     flow.redirect_uri = cfg["redirect_uri"]
     if cfg["redirect_uri"].startswith("http://localhost"):
         os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
@@ -72,21 +78,22 @@ def _flow(state: str | None = None) -> Flow:
 
 def authorization_url() -> str:
     state = secrets.token_urlsafe(32)
-    with _state_lock:
-        _oauth_states.add(state)
-    url, _ = _flow(state=state).authorization_url(
+    flow = _flow(state=state)
+    url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
-        prompt="consent",
+        prompt="consent select_account",
     )
+    with _state_lock:
+        _oauth_states[state] = flow.code_verifier
     return url
 
 
-def _consume_state(state: str) -> None:
+def _consume_state(state: str) -> str | None:
     with _state_lock:
         if not state or state not in _oauth_states:
             raise RuntimeError("Invalid or expired OAuth state. Start Connect YouTube again.")
-        _oauth_states.remove(state)
+        return _oauth_states.pop(state)
 
 
 def _fernet() -> Fernet:
@@ -117,9 +124,16 @@ def _save_credentials(credentials: Credentials) -> None:
 
 
 def exchange_callback(code: str, state: str) -> None:
-    _consume_state(state)
-    flow = _flow(state=state)
-    flow.fetch_token(code=code)
+    code_verifier = _consume_state(state)
+    if not code_verifier:
+        raise RuntimeError("OAuth PKCE verifier was lost. Start Connect YouTube again.")
+    flow = _flow(state=state, code_verifier=code_verifier)
+    try:
+        flow.fetch_token(code=code, code_verifier=code_verifier)
+    except Exception as exc:
+        raise RuntimeError(
+            f"OAuth token exchange failed (PKCE verifier length={len(code_verifier)}): {exc}"
+        ) from exc
     credentials = flow.credentials
     if not credentials.refresh_token:
         raise RuntimeError("Google did not return a refresh token. Revoke access and connect again.")
