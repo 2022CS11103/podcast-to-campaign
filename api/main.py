@@ -1,10 +1,14 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import json
+import os
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import unquote
+from dotenv import load_dotenv
 from api.schemas import (
     ProcessRequest,
     ProcessResponse,
@@ -48,8 +52,13 @@ app.add_middleware(
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
+PUBLIC_FRONTEND_URL = os.getenv(
+    "FRONTEND_URL", "/app"
+).rstrip("/")
 CONTENT_BANK = PROJECT_ROOT / "output" / "content_bank.json"
-FRONTEND_DIR = PROJECT_ROOT / "frontend"
+FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
+UPLOAD_DIR = PROJECT_ROOT / "input" / "uploads"
 MEDIA_FOLDERS = {
     "final_shorts", "youtube_shorts", "instagram_reels", "tiktok", "posts",
 }
@@ -79,10 +88,69 @@ def health():
 @app.get("/studio")
 @app.get("/studio/")
 def studio():
-    index = FRONTEND_DIR / "index.html"
+    return RedirectResponse(PUBLIC_FRONTEND_URL, status_code=302)
+
+
+if (FRONTEND_DIST / "assets").exists():
+    app.mount(
+        "/app/assets",
+        StaticFiles(directory=FRONTEND_DIST / "assets"),
+        name="creatoros-assets",
+    )
+
+
+def _frontend_app():
+    index = FRONTEND_DIST / "index.html"
     if not index.exists():
-        raise HTTPException(status_code=404, detail="Studio UI is missing")
+        raise HTTPException(
+            status_code=503,
+            detail="Frontend build is missing. Run `npm run build` inside frontend/.",
+        )
     return FileResponse(index, media_type="text/html")
+
+
+@app.get("/app")
+@app.get("/app/")
+@app.get("/app/{route:path}")
+def frontend_app(route: str = ""):
+    return _frontend_app()
+
+
+@app.post("/uploads/video")
+async def upload_source_video(file: UploadFile = File(...)):
+    suffix = Path(file.filename or "").suffix.lower()
+    allowed = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+    if suffix not in allowed:
+        raise HTTPException(
+            status_code=415,
+            detail="Upload an MP4, MOV, MKV, WebM, or M4V video.",
+        )
+
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    destination = UPLOAD_DIR / f"{uuid.uuid4().hex}{suffix}"
+    total = 0
+    max_bytes = 5 * 1024 * 1024 * 1024
+    try:
+        with destination.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Video exceeds the 5 GB upload limit.",
+                    )
+                output.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+
+    return {
+        "path": str(destination.resolve()),
+        "filename": file.filename,
+        "size_bytes": total,
+    }
 
 
 @app.get("/media/{folder}/{filename}")
@@ -273,14 +341,14 @@ def connect_youtube():
 @app.get("/oauth/youtube/callback")
 def youtube_callback(code: str = "", state: str = "", error: str = ""):
     if error:
-        return RedirectResponse("/studio?youtube=denied", status_code=302)
+        return RedirectResponse(f"{PUBLIC_FRONTEND_URL}?youtube=denied", status_code=302)
     if not code or not state:
         raise HTTPException(status_code=400, detail="Google callback is missing code or state.")
     try:
         exchange_youtube_callback(code, state)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return RedirectResponse("/studio?youtube=connected", status_code=302)
+    return RedirectResponse(f"{PUBLIC_FRONTEND_URL}?youtube=connected", status_code=302)
 
 
 @app.post("/disconnect/youtube")
