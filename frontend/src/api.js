@@ -42,8 +42,8 @@ export async function apiFetch(path, options = {}) {
 
 export const creatorApi = {
   accounts: () => apiFetch("/accounts"),
-  disconnectYouTube: () =>
-    apiFetch("/disconnect/youtube", { method: "POST" }),
+  disconnectAccount: (platform) =>
+    apiFetch(`/disconnect/${platform}`, { method: "POST" }),
   startCampaign: (payload) =>
     apiFetch("/process", {
       method: "POST",
@@ -70,4 +70,18 @@ export const creatorApi = {
         made_for_kids: false,
       }),
     }),
+  stopJob: (jobId, payload = {}) =>
+    apiFetch(`/jobs/${jobId}/stop`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  reduceScope: (jobId, plan) =>
+    apiFetch(`/jobs/${jobId}/scope`, {
+      method: "POST",
+      body: JSON.stringify({ plan }),
+    }),
+  calendar: (year, month) => {
+    const query = year && month ? `?year=${year}&month=${month}` : "";
+    return apiFetch(`/campaign-calendar${query}`);
+  },
 };

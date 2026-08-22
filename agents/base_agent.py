@@ -22,19 +22,29 @@ class BaseAgent(ABC):
         print(f"[{self.__class__.__name__}] {message}")
 
     def run_script(self, *args):
-        env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
-        result = subprocess.run(
-            [PYTHON, *args],
+        env = {
+            **os.environ,
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+            "PYTHONUNBUFFERED": "1",
+        }
+        proc = subprocess.Popen(
+            [PYTHON, "-u", *args],
             cwd=PROJECT_ROOT,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             encoding="utf-8",
             errors="replace",
             env=env,
+            bufsize=1,
         )
-        if result.stdout:
-            print(result.stdout)
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "").strip()
+        output = []
+        for line in proc.stdout:
+            output.append(line)
+            print(line, end="", flush=True)
+        proc.wait()
+        if proc.returncode != 0:
+            detail = "".join(output).strip()
             raise RuntimeError(f"{args[0]} failed:\n{detail[-2500:]}")
-        return result
+        return proc

@@ -25,6 +25,8 @@ from config.platform_specs import (
     MAX_ANALYZED_CANDIDATES,
     platforms_for_duration,
 )
+from utils.sentences import ends_sentence, looks_like_start
+from utils.show_detect import keyword_hits, is_hook_line
 
 # Patterns that usually open a clip-worthy moment in lectures/podcasts.
 HOOK_PATTERNS = [
@@ -62,6 +64,9 @@ def heuristic_score(text: str) -> float:
     words = len(text.split())
     if 40 <= words <= 140:
         score += 1.0
+    score += min(4.0, keyword_hits(text) * 1.2)
+    if is_hook_line(text.split(".")[0] if "." in text else text[:120]):
+        score += 2.0
     return score
 
 
@@ -70,12 +75,20 @@ def build_candidates(segments):
     raw = []
 
     for i in range(n):
-        start = segments[i]["start"]
-        if FILLER_OPENERS.search((segments[i].get("text") or "").strip()):
-            # still allow it if a later sentence in the window is strong,
-            # but mark the start as weak by skipping tiny windows from here
-            pass
+        prev_text = segments[i - 1].get("text") or "" if i else ""
+        opener = (segments[i].get("text") or "").strip()
+        pause = 0.0
+        if i:
+            try:
+                pause = float(segments[i]["start"]) - float(segments[i - 1]["end"])
+            except (TypeError, ValueError, KeyError):
+                pause = 0.0
+        if not looks_like_start(opener, prev_text, pause):
+            continue
+        if FILLER_OPENERS.search(opener):
+            continue
 
+        start = segments[i]["start"]
         parts = []
         hit_targets = set()
 
@@ -85,6 +98,16 @@ def build_candidates(segments):
             duration = round(end - start, 2)
             if duration < CANDIDATE_MIN_SECONDS:
                 continue
+            nxt = segments[j + 1] if j + 1 < n else None
+            closed = ends_sentence(segments[j].get("text") or "")
+            if not closed and nxt is not None:
+                gap = float(nxt.get("start") or end) - float(end)
+                closed = gap >= 0.55
+            if not closed:
+                if nxt is None:
+                    closed = duration >= CANDIDATE_MIN_SECONDS
+                else:
+                    continue
 
             text = " ".join(parts).strip()
             word_count = len(text.split())

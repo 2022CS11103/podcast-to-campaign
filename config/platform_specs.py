@@ -106,14 +106,18 @@ MAX_UNIQUE_RENDERS = 5
 
 # Transcribe/score the talk in slices. Stop as soon as enough
 # unique clips clear MIN_OVERALL_SCORE — no need to parse a full hour.
-SCAN_WINDOW_SECONDS = 180
-WHISPER_SLICE_SECONDS = 15
-# First 15 minutes is enough if we already have the requested highlights.
-MAX_SCAN_SECONDS = 900
+SCAN_WINDOW_SECONDS = 60
+# Overlap so a sentence that straddles a chunk edge is not chopped in half.
+SCAN_OVERLAP_SECONDS = 6
+# Stop as soon as we have a package — but not if the opening was junk.
+MAX_SCAN_SECONDS = 360
+# Keep walking later chunks until we find usable moments, then quit.
+HARD_MAX_SCAN_SECONDS = 360
 
-# Picture + sound energy during scan (cheap 2 fps, not full-video YOLO).
-VIDEO_ANALYSIS_ENABLED = True
-CANDIDATES_PER_WINDOW = 4
+# Picture energy is skipped during scan so Whisper can finish a chunk
+# and score it immediately. Caption/zoom still use the transcript.
+VIDEO_ANALYSIS_ENABLED = False
+CANDIDATES_PER_WINDOW = 1
 
 # A/B: three hook/caption variants per clip. Variant A ships first;
 # B/C are held for tests or used if A underperforms.

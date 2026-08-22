@@ -8,6 +8,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from utils.content_plan import load_plan
+from utils.sentences import apply_to_clip
+from utils.show_detect import keyword_hits
+from config.show_style import load_resolved
 from config.platform_specs import (
     video_clip_demand,
     duration_fit,
@@ -35,14 +38,28 @@ def remove_time_overlap(results, iou_threshold=0.55):
 
 def ranking_score(clip):
     """
-    Blend Gemini overall_score with whether the length actually fits
-    a short-form platform. A brilliant 90s monologue is a blog, not a Reel.
+    Blend Gemini overall_score with platform fit, then bias toward the
+    show type: laughs for comedy, insight keywords for interviews.
     """
     base = float(clip.get("overall_score", 0))
     duration = float(clip.get("duration_seconds") or (clip.get("end", 0) - clip.get("start", 0)))
     best_fit = max((duration_fit(duration, p) for p in VIDEO_PLATFORMS), default=0.5)
     completeness = (clip.get("scores") or {}).get("completeness", 7)
-    return base * (0.65 + 0.25 * best_fit + 0.10 * (completeness / 10))
+    score = base * (0.65 + 0.25 * best_fit + 0.10 * (completeness / 10))
+    show = load_resolved()
+    signals = clip.get("visual_signals") or {}
+    if show.get("id") == "comedy":
+        if signals.get("laughter") or float(signals.get("reaction_seconds") or 0) >= 0.8:
+            score *= 1.22
+        if clip.get("highlight_reason") == "audience reaction":
+            score *= 1.08
+    else:
+        hits = keyword_hits(clip.get("text") or "")
+        if hits:
+            score *= 1.0 + min(0.25, hits * 0.05)
+        if (clip.get("hook") or "").strip():
+            score *= 1.04
+    return score
 
 
 def get_top_k():
@@ -76,27 +93,30 @@ def _energy(clip):
 
 
 def pick_clips(ranked, needed):
-    """Take the best unique moments. Hot picture/sound can fill remaining slots."""
+    """Take the best unique moments. Never return empty if anything was scored."""
+    if not ranked:
+        return []
     usable = [
         c for c in ranked
         if float(c.get("overall_score") or 0) >= USABLE_SCORE_FLOOR
         or _energy(c) >= 72
     ]
-    if usable:
-        chosen = usable[:needed]
-        print(
-            f"Ranker: {len(usable)} clips usable or energy-hot, "
-            f"rendering top {len(chosen)} unique (asked {needed})."
-        )
-        return chosen
-    if ranked:
-        print(
-            f"Ranker: none reached {USABLE_SCORE_FLOOR}. "
-            f"Keeping the single best (score {ranked[0].get('overall_score')})."
-        )
-        return ranked[:1]
-    print("Ranker: no scored clips at all.")
-    return []
+    pool = usable or ranked
+    chosen = []
+    seen = set()
+    for clip in pool + ranked:
+        key = (clip.get("chunk_id"), round(float(clip.get("start") or 0), 1))
+        if key in seen:
+            continue
+        seen.add(key)
+        chosen.append(clip)
+        if len(chosen) >= max(1, needed):
+            break
+    print(
+        f"Ranker: {len(usable)} usable / {len(ranked)} scored, "
+        f"rendering {len(chosen)} unique (asked {needed})."
+    )
+    return chosen
 
 
 def main():
@@ -112,16 +132,35 @@ def main():
     with open(input_file, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    transcript_file = PROJECT_ROOT / "output" / "transcript.json"
+    segments = []
+    if transcript_file.exists():
+        with open(transcript_file, "r", encoding="utf-8") as f:
+            segments = (json.load(f) or {}).get("segments") or []
+
     ranked = sorted(
         data["results"],
         key=ranking_score,
         reverse=True
     )
+    for clip in ranked:
+        apply_to_clip(clip, segments)
 
     ranked = remove_time_overlap(ranked)
+    complete = [
+        c for c in ranked
+        if not c.get("starts_mid_thought")
+    ]
+    if complete:
+        ranked = complete + [c for c in ranked if c.get("starts_mid_thought")]
     strong = [c for c in ranked if float(c.get("overall_score") or 0) >= MIN_OVERALL_SCORE]
     print(f"Scan quality: {len(strong)} clips >= {MIN_OVERALL_SCORE} (early-stop bar).")
     top_clips = pick_clips(ranked, top_k)
+
+    if not top_clips:
+        raise RuntimeError(
+            "No scored moments to cut. Try another source, or a later section of the talk."
+        )
 
     output = {
         "total_selected": len(top_clips),
@@ -148,7 +187,7 @@ Hook: {clip.get('hook')}
 """
         )
 
-    print(f"\n✅ Saved to {output_file}")
+    print(f"Saved to {output_file}")
 
 
 if __name__ == "__main__":

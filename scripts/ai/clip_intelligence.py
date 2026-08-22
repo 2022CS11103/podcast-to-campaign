@@ -12,11 +12,12 @@ from utils.gemini_clients import generate_content
 from utils.cost_tracker import log_gemini_call
 from config.platform_specs import platforms_for_duration, VIDEO_ANALYSIS_ENABLED
 from scripts.pipeline.visual_energy import fuse_editor_score, highlight_reason
+from config.show_style import load_resolved
 
 PROMPT = """
-You are an expert content strategist, YouTube growth expert, and podcast editor.
+You are an expert short-form editor for {show_label}.
 
-Your job is to decide whether this transcript window is worth turning into a short-form clip.
+{show_rules}
 
 The window is already cut on sentence boundaries. Judge the OPENING (first 1-3 seconds / first sentence) especially hard — that is the hook.
 
@@ -44,8 +45,9 @@ Return ONLY valid JSON with keys: summary, hook, scores (hook/education/emotion/
 
 
 def analyze_chunk(text, duration, platforms):
+    show = load_resolved()
     prompt = (
-        PROMPT
+        PROMPT.format(show_label=show.get("label") or "podcasts", show_rules=show.get("rules") or "")
         + f"\nClip duration (seconds): {duration}\n"
         + f"Suggested platforms for this length: {', '.join(platforms) or 'any'}\n\n"
         + "Transcript:\n"
@@ -88,9 +90,9 @@ def score_chunk(chunk):
     analysis = parse_analysis(raw)
 
     if analysis.get("starts_mid_thought"):
-        analysis["overall_score"] = max(10, int(analysis.get("overall_score", 0)) - 12)
+        analysis["overall_score"] = max(10, int(analysis.get("overall_score", 0)) - 28)
     if analysis.get("payoff_arrives") is False:
-        analysis["overall_score"] = max(10, int(analysis.get("overall_score", 0)) - 10)
+        analysis["overall_score"] = max(10, int(analysis.get("overall_score", 0)) - 16)
 
     analysis["start"] = chunk["start"]
     analysis["end"] = chunk["end"]

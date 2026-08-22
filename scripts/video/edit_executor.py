@@ -24,11 +24,22 @@ os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
+from config.editing_style import (
+    CAPTION,
+    MIN_SHOT_SECONDS,
+    normalize_pace,
+    profile_for,
+)
+from scripts.video.edit_quality import evaluate, safer_plan, summarize
 from scripts.video.subtitle_generator import ass_time, cue_lines, split_cues
 from scripts.video.render_shorts import ffmpeg_subtitles_path
+from utils.sentences import flatten_words, is_cut_point, snap_window
+from config.show_style import load_resolved
+from utils.show_detect import caption_words, gap_is_reaction
 
 MAX_PIECES = 8
-MIN_PIECE = 0.35
+MIN_PIECE = MIN_SHOT_SECONDS
+MAX_RENDER_ATTEMPTS = 2
 
 
 def load_json(path: Path, default=None):
@@ -75,32 +86,112 @@ def load_clips_and_plans():
     return clips, plans
 
 
-def speech_ranges(clip, segments, min_gap):
+def word_spans(segments, start, end):
+    """Word-level (start, end) pairs inside the window, when Whisper gave them."""
+    spans = []
+    for seg in segments or []:
+        for word in seg.get("words") or []:
+            try:
+                a = float(word.get("start"))
+                b = float(word.get("end"))
+            except (TypeError, ValueError):
+                continue
+            if b <= start or a >= end:
+                continue
+            spans.append((max(start, a), min(end, b)))
+    spans.sort()
+    return spans
+
+
+def limit_ranges(ranges, max_ranges):
+    """Bound the shot count by merging the tightest gaps, never by dropping speech."""
+    rows = [list(r) for r in ranges]
+    while len(rows) > max_ranges:
+        gaps = [(rows[i + 1][0] - rows[i][1], i) for i in range(len(rows) - 1)]
+        _, i = min(gaps)
+        rows[i][1] = rows[i + 1][1]
+        del rows[i + 1]
+    return [tuple(r) for r in rows]
+
+
+def speech_ranges(clip, segments, min_gap, breath=0.0, max_ranges=None, keep_tail=False, rms_series=None):
     start = float(clip["start"])
     end = float(clip["end"])
-    hits = []
-    for seg in segments or []:
-        a = max(start, float(seg.get("start") or 0))
-        b = min(end, float(seg.get("end") or 0))
-        if b - a >= 0.16:
-            hits.append((a, b))
-    if not hits:
-        return [(start, end)]
-    hits.sort()
-    merged = [hits[0]]
-    for a, b in hits[1:]:
-        if a - merged[-1][1] < min_gap:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
-        else:
-            merged.append((a, b))
+    words = [
+        row for row in flatten_words(segments)
+        if row["end"] > start and row["start"] < end
+    ]
+    if not words:
+        hits = []
+        for seg in segments or []:
+            a = max(start, float(seg.get("start") or 0))
+            b = min(end, float(seg.get("end") or 0))
+            if b - a >= 0.16:
+                hits.append((a, b))
+        if not hits:
+            return [(start, end)]
+        merged = [list(hits[0])]
+        for a, b in hits[1:]:
+            gap = a - merged[-1][1]
+            laugh = gap_is_reaction(rms_series, merged[-1][1], a)
+            if gap < max(min_gap, 0.70) or laugh:
+                merged[-1][1] = max(merged[-1][1], b)
+            else:
+                merged.append([a, b])
+    else:
+        merged = [[words[0]["start"], words[0]["end"]]]
+        prev_token = words[0]["word"]
+        for row in words[1:]:
+            gap = row["start"] - merged[-1][1]
+            laugh = gap_is_reaction(rms_series, merged[-1][1], row["start"])
+            if laugh or not is_cut_point(prev_token, row["word"], gap, min_gap):
+                merged[-1][1] = max(merged[-1][1], row["end"])
+            else:
+                merged.append([row["start"], row["end"]])
+            prev_token = row["word"]
+
+    if breath:
+        padded = []
+        for a, b in merged:
+            padded.append((max(start, a - breath), min(end, b + breath)))
+        merged = padded
+    else:
+        merged = [(a, b) for a, b in merged]
+
     if merged[0][0] - start < 0.28:
-        merged[0] = (start, merged[0][1])
-    if end - merged[-1][1] < 0.28:
-        merged[-1] = (merged[-1][0], end)
+        merged = [(start, merged[0][1]), *merged[1:]]
+    tail = end - merged[-1][1]
+    if keep_tail or tail < 0.28 or gap_is_reaction(rms_series, merged[-1][1], end):
+        merged = [*merged[:-1], (merged[-1][0], end)]
+    merged = [(a, b) for a, b in merged if b - a >= MIN_PIECE] or [(start, end)]
+    if max_ranges:
+        merged = limit_ranges(merged, max_ranges)
     return merged
 
 
-def apply_punches(ranges, punches):
+def _merge_overflow(pieces, max_pieces):
+    """Fold extra shots into neighbours; dropping them would drop dialogue."""
+    while len(pieces) > max_pieces and len(pieces) > 1:
+        order = sorted(
+            range(len(pieces) - 1),
+            key=lambda i: (
+                max(pieces[i]["zoom"], pieces[i + 1]["zoom"]) > 1.02,
+                (pieces[i]["src_end"] - pieces[i]["src_start"])
+                + (pieces[i + 1]["src_end"] - pieces[i + 1]["src_start"]),
+            ),
+        )
+        i = order[0]
+        a, b = pieces[i], pieces[i + 1]
+        longer = a if (a["src_end"] - a["src_start"]) >= (b["src_end"] - b["src_start"]) else b
+        pieces[i : i + 2] = [{
+            "src_start": a["src_start"],
+            "src_end": b["src_end"],
+            "zoom": longer["zoom"],
+        }]
+    return pieces
+
+
+def apply_punches(ranges, punches, max_pieces=MAX_PIECES):
     pieces = [{"src_start": a, "src_end": b, "zoom": 1.0} for a, b in ranges]
     for punch in punches or []:
         at = float(punch["at_src"])
@@ -130,10 +221,7 @@ def apply_punches(ranges, punches):
                 cleaned[-1]["src_end"] = piece["src_end"]
             continue
         cleaned.append(piece)
-    if len(cleaned) > MAX_PIECES:
-        zooms = [p for p in cleaned[1:-1] if p["zoom"] > 1.02]
-        keep = [cleaned[0]] + zooms[: MAX_PIECES - 2] + [cleaned[-1]]
-        cleaned = keep[:MAX_PIECES]
+    cleaned = _merge_overflow(cleaned, max_pieces)
     return cleaned or [{"src_start": ranges[0][0], "src_end": ranges[-1][1], "zoom": 1.0}]
 
 
@@ -156,17 +244,92 @@ def _ass_escape(text):
     )
 
 
-HOOK_HOLD = 1.45
+HOOK_HOLD = CAPTION["hook_hold_seconds"]
 FILLER = {
     "the", "a", "an", "and", "of", "to", "it", "it's", "its", "yeah",
     "uh", "um", "like", "i", "i'm", "im", "oh", "so", "just", "very",
 }
 
 
-def write_mosaic_ass(segments, clip_start, clip_end, pieces, emphasize, hook, dest: Path):
+def _word_cues(segments, clip_start, clip_end, pieces):
+    """Cues timed off real word boundaries, so captions land on the syllable."""
+    cues = []
+
+    def flush(bucket):
+        if bucket:
+            cues.append((bucket[0][0], bucket[-1][1], [row[2] for row in bucket]))
+
+    for seg in segments or []:
+        bucket = []
+        for word in seg.get("words") or []:
+            token = (word.get("word") or "").strip()
+            if not token:
+                continue
+            try:
+                a = float(word["start"])
+                b = float(word["end"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if b <= clip_start or a >= clip_end:
+                continue
+            t0 = remap_time(max(a, clip_start), pieces)
+            t1 = remap_time(max(min(b, clip_end) - 0.01, max(a, clip_start)), pieces)
+            if t0 is None or t1 is None:
+                continue
+            bucket.append((t0, max(t1, t0 + 0.08), token))
+            if len(bucket) >= CAPTION["max_words_per_cue"]:
+                flush(bucket)
+                bucket = []
+        flush(bucket)
+    cues.sort(key=lambda row: row[0])
+    return cues
+
+
+def _segment_cues(segments, clip_start, clip_end, pieces):
+    """Fallback cues: spread a sentence's words across its own duration."""
+    rows = []
+    for segment in segments or []:
+        if float(segment.get("end") or 0) < clip_start:
+            continue
+        if float(segment.get("start") or 0) > clip_end:
+            break
+        src0 = max(float(segment["start"]), clip_start)
+        src1 = min(float(segment["end"]), clip_end)
+        if src1 <= src0:
+            continue
+        out0 = remap_time(src0, pieces)
+        out1 = remap_time(src1 - 0.01, pieces)
+        if out0 is None or out1 is None or out1 <= out0:
+            continue
+        for t0, t1, words in split_cues(segment.get("text", ""), out0, out1):
+            if t1 > t0 and words:
+                rows.append((t0, t1, words))
+    rows.sort(key=lambda row: row[0])
+    return rows
+
+
+def write_mosaic_ass(segments, clip_start, clip_end, pieces, emphasize, hook, dest: Path, caption_style="hormozi"):
     keys = {w.lower().strip(".,!?'\"") for w in (emphasize or []) if w}
     hook_line = _ass_escape(" ".join((hook or "").split()[:8]))
-    header = """[Script Info]
+    if caption_style == "hormozi":
+        header = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial Black,54,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,0.2,0,1,7,0,2,70,70,250,1
+Style: Pop,Arial Black,72,&H0000E5FF,&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,0.0,0,1,8,0,2,55,55,250,1
+Style: Hook,Arial Black,48,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,0.2,0,1,6,0,8,80,80,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    else:
+        header = """[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
@@ -188,38 +351,25 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             f"Dialogue: 1,0:00:00.00,{ass_time(HOOK_HOLD)},Hook,,0,0,0,,{{\\fad(80,140)\\bord5}}{hook_line}\n"
         )
 
+    timed = _word_cues(segments, clip_start, clip_end, pieces)
+    if not timed:
+        timed = _segment_cues(segments, clip_start, clip_end, pieces)
+
     raw = []
-    for segment in segments or []:
-        if float(segment.get("end") or 0) < clip_start:
+    for t0, t1, words in timed:
+        if t1 <= t0 or not words:
             continue
-        if float(segment.get("start") or 0) > clip_end:
-            break
-        src0 = max(float(segment["start"]), clip_start)
-        src1 = min(float(segment["end"]), clip_end)
-        if src1 <= src0:
+        meaningful = [w for w in words if w.lower().strip(".,!?'\"") not in FILLER]
+        if not meaningful:
             continue
-        out0 = remap_time(src0, pieces)
-        out1 = remap_time(src1 - 0.01, pieces)
-        if out0 is None or out1 is None or out1 <= out0:
-            continue
-        for t0, t1, words in split_cues(segment.get("text", ""), out0, out1):
-            if t1 <= t0 or not words:
-                continue
-            meaningful = [
-                w for w in words
-                if w.lower().strip(".,!?'\"") not in FILLER
-            ]
-            if not meaningful:
-                continue
-            raw.append((t0, t1, words))
-    raw.sort(key=lambda row: row[0])
+        raw.append((t0, t1, caption_words(words)))
 
     cursor = HOOK_HOLD if hook_line else 0.0
     packed = []
     for t0, t1, words in raw:
         t0 = max(t0, cursor)
-        t1 = max(t1, t0 + 0.45)
-        t1 = min(t1, t0 + 2.1)
+        t1 = max(t1, t0 + CAPTION["min_cue_seconds"])
+        t1 = min(t1, t0 + CAPTION["max_cue_seconds"])
         if t1 <= t0 + 0.28:
             continue
         packed.append((t0, t1, words))
@@ -378,16 +528,63 @@ def default_plan(clip):
     }
 
 
-def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root):
+def plan_window(clip, plan, segments=None):
+    """The plan's trimmed window, snapped to complete sentences."""
     start = float(clip["start"])
     end = float(clip["end"])
-    pace = plan.get("pace") or "fast"
-    min_gap = {"fast": 0.22, "medium": 0.4, "hold": 9.0}.get(pace, 0.28)
-    ranges = speech_ranges(clip, segments, min_gap)
-    if not plan.get("drop_silences", True):
+    trim = plan.get("trim") if isinstance(plan.get("trim"), dict) else None
+    slack = 12.0
+    if not trim:
+        t0, t1 = start, end
+    else:
+        try:
+            t0 = min(max(float(trim.get("start", start)), start - slack), end)
+            t1 = min(max(float(trim.get("end", end)), start), end + slack)
+        except (TypeError, ValueError):
+            t0, t1 = start, end
+        if t1 - t0 < max(MIN_PIECE * 2, 4.0):
+            t0, t1 = start, end
+    t0, t1 = snap_window(t0, t1, segments)
+    extra = float(plan.get("reaction_hold") or 0)
+    if extra >= 0.5:
+        t1 += extra
+    return t0, t1
+
+
+def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, rms_series=None):
+    start, end = plan_window(clip, plan, segments)
+    pace = normalize_pace(plan.get("pace"), plan.get("goal"))
+    profile = profile_for(pace)
+    show = load_resolved()
+    keep_tail = bool(show.get("keep_reactions") or plan.get("reaction_hold"))
+    order = plan.get("shot_order") or []
+    if order:
+        ranges = []
+        for shot in order:
+            part = speech_ranges(
+                {"start": shot["src_start"], "end": shot["src_end"]},
+                segments,
+                profile["silence_gap"],
+                breath=profile["breath"],
+                keep_tail=False,
+                rms_series=rms_series,
+            )
+            ranges.extend(part)
+        ranges = ranges or [(start, end)]
+    elif plan.get("drop_silences", True):
+        ranges = speech_ranges(
+            {"start": start, "end": end},
+            segments,
+            profile["silence_gap"],
+            breath=profile["breath"],
+            max_ranges=profile["max_shots"],
+            keep_tail=keep_tail,
+            rms_series=rms_series,
+        )
+    else:
         ranges = [(start, end)]
     punches = plan.get("punch_ins") or default_plan(clip)["punch_ins"]
-    pieces = apply_punches(ranges, punches)
+    pieces = apply_punches(ranges, punches, max_pieces=profile["max_shots"] + 2)
     scratch = scratch_root / f"short_{index}"
     if scratch.exists():
         shutil.rmtree(scratch)
@@ -416,8 +613,9 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root):
     write_mosaic_ass(
         segments, start, end, pieces,
         plan.get("emphasize") or [],
-        clip.get("hook") or plan.get("reason") or "",
+        plan.get("hook_line") or clip.get("hook") or plan.get("reason") or "",
         ass,
+        caption_style=plan.get("caption_style") or "hormozi",
     )
     final = output_dir / f"short_{index}.mp4"
     try:
@@ -425,7 +623,91 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root):
     except RuntimeError:
         shutil.copy2(nosub, final)
     shutil.rmtree(scratch, ignore_errors=True)
-    return final, pieces
+    return final, pieces, ass
+
+
+def cap_to_plan(clips):
+    """Render only as many cuts as the current plan still needs.
+
+    The plan can shrink after ranking when a creator reduces scope mid-run,
+    and there is no point spending minutes of ffmpeg on cuts nobody asked for.
+    """
+    try:
+        from config.platform_specs import video_clip_demand
+        from utils.content_plan import load_plan
+
+        demand = video_clip_demand(load_plan(required=False))
+    except Exception:
+        return clips
+    if demand and 0 < demand < len(clips):
+        _say(f"Plan needs {demand} cut(s) — skipping {len(clips) - demand} ranked clip(s)")
+        return clips[:demand]
+    return clips
+
+
+def render_with_review(source, clip, plan, segments, index, output_dir, scratch_root, rms_series=None):
+    """Render, score against the rule book, and re-cut once if it fails.
+
+    Returns the execution row for edit_execution.json plus the rubric report.
+    """
+    attempt_log = []
+    row = None
+    report = None
+    fallback_used = False
+
+    for attempt in range(1, MAX_RENDER_ATTEMPTS + 1):
+        try:
+            dest, pieces, ass = execute_clip(
+                source, clip, plan, segments, index, output_dir, scratch_root, rms_series
+            )
+        except Exception as exc:
+            _say(f"  mosaic failed ({exc}) - one-shot fallback")
+            plan = default_plan(clip)
+            plan["drop_silences"] = False
+            fallback_used = True
+            dest, pieces, ass = execute_clip(
+                source, clip, plan, segments, index, output_dir, scratch_root, rms_series
+            )
+            row = {
+                "index": index, "file": str(dest), "shots": len(pieces),
+                "ok": True, "fallback": True, "error": str(exc)[-400:],
+            }
+            report = evaluate(dest, ass, plan, shots=len(pieces))
+            break
+
+        report = evaluate(dest, ass, plan, shots=len(pieces))
+        weak = [c["label"] for c in report["checks"] if not c["ok"]]
+        _say(
+            f"  saved {dest.name}  ({len(pieces)} shots)  "
+            f"rubric {report['score']}/100"
+            + (f" — weak: {', '.join(weak)}" if weak else " — clean")
+        )
+        row = {
+            "index": index, "file": str(dest), "shots": len(pieces),
+            "ok": True, "quality_score": report["score"],
+            "quality_passed": report["passed"],
+        }
+        if fallback_used:
+            row["fallback"] = True
+        attempt_log.append({"attempt": attempt, "score": report["score"], "failures": report["failures"]})
+
+        if report["passed"] or attempt == MAX_RENDER_ATTEMPTS:
+            break
+        revised = safer_plan(plan, report)
+        if not revised:
+            _say("  rubric failed but no safer plan available - keeping this cut")
+            break
+        _say(f"  re-cutting: {'; '.join(revised.get('_revision') or [])}")
+        plan = revised
+
+    if report is not None:
+        report["index"] = index
+        report["attempts"] = attempt_log
+        report["reason"] = plan.get("reason")
+        report["pace"] = plan.get("pace")
+    if row is not None and attempt_log:
+        row["attempts"] = len(attempt_log)
+    return row, report
 
 
 def run_edits(source: Path):
@@ -441,9 +723,13 @@ def run_edits(source: Path):
         raise FileNotFoundError(source)
 
     clips, plans = load_clips_and_plans()
+    clips = cap_to_plan(clips)
     transcript = load_json(PROJECT_ROOT / "output" / "transcript.json") or {}
     segments = transcript.get("segments") or []
-    _say(f"Mosaic editor: {len(clips)} cuts from {source.name}")
+    rms_doc = load_json(PROJECT_ROOT / "output" / "rms_series.json") or {}
+    rms_series = rms_doc.get("samples") or []
+    show = load_resolved()
+    _say(f"Mosaic editor: {len(clips)} cuts from {source.name}  [{show.get('id')}]")
     if not clips:
         raise RuntimeError("No clips to edit (clips.json and edit_plans.json were empty).")
 
@@ -453,34 +739,31 @@ def run_edits(source: Path):
     scratch_root.mkdir(parents=True, exist_ok=True)
 
     executed = []
+    reports = []
     t0 = time.time()
     try:
         for i, clip in enumerate(clips, start=1):
             plan = plans.get(i) or default_plan(clip)
             _say(f"\nEditing short_{i}.mp4  [{plan.get('pace')}] {plan.get('reason') or ''}")
-            try:
-                dest, pieces = execute_clip(
-                    source, clip, plan, segments, i, output_dir, scratch_root
-                )
-                _say(f"  saved {dest.name}  ({len(pieces)} shots)")
-                executed.append({"index": i, "file": str(dest), "shots": len(pieces), "ok": True})
-            except Exception as exc:
-                _say(f"  mosaic failed ({exc}) - one-shot fallback")
-                simple = default_plan(clip)
-                simple["drop_silences"] = False
-                dest, pieces = execute_clip(
-                    source, clip, simple, segments, i, output_dir, scratch_root
-                )
-                executed.append({
-                    "index": i, "file": str(dest), "shots": len(pieces),
-                    "ok": True, "fallback": True, "error": str(exc)[-400:],
-                })
+            row, report = render_with_review(
+                source, clip, plan, segments, i, output_dir, scratch_root, rms_series
+            )
+            executed.append(row)
+            reports.append(report)
     finally:
         shutil.rmtree(scratch_root, ignore_errors=True)
         log_path = PROJECT_ROOT / "output" / "edit_execution.json"
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump({"clips": executed, "seconds": round(time.time() - t0, 1)}, f, indent=2)
-        _say(f"\nMosaic edits done in {time.time() - t0:.1f}s  ({sum(1 for x in executed if x.get('ok'))} files)")
+        quality = summarize(reports)
+        with open(PROJECT_ROOT / "output" / "edit_quality.json", "w", encoding="utf-8") as f:
+            json.dump(quality, f, indent=2)
+        avg = quality.get("average_score")
+        _say(
+            f"\nMosaic edits done in {time.time() - t0:.1f}s  "
+            f"({sum(1 for x in executed if x.get('ok'))} files, "
+            f"rubric {avg if avg is not None else 'n/a'}/100)"
+        )
 
     ok_files = list(output_dir.glob("short_*.mp4"))
     if not ok_files:

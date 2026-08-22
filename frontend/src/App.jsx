@@ -10,8 +10,10 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  Ban,
   BarChart3,
   BriefcaseBusiness as Linkedin,
+  CalendarDays,
   Camera as Instagram,
   Check,
   CheckCircle2,
@@ -33,12 +35,14 @@ import {
   Rocket,
   Settings2,
   Sparkles,
+  Square,
   Trash2,
   Upload,
   WandSparkles,
   X,
   Zap,
 } from "lucide-react";
+import { BrandIcon } from "./BrandIcon";
 import { AuthProvider, useAuth } from "./auth";
 import { apiUrl, creatorApi } from "./api";
 import {
@@ -47,6 +51,8 @@ import {
   FLOW_STEPS,
   PLATFORM_META,
   PROCESSING_STEPS,
+  CALENDAR_PLATFORMS,
+  SHOW_TYPES,
 } from "./campaign";
 import LOGO_URL from "./assets/creatoros-logo.png";
 
@@ -100,6 +106,9 @@ function AppShell({ children, step, user }) {
           </button>
           <button onClick={() => navigate("/results/latest")}>
             <BarChart3 size={18} /> Campaign library
+          </button>
+          <button onClick={() => navigate("/results/latest")}>
+            <CalendarDays size={18} /> Posting calendar
           </button>
           <button>
             <Settings2 size={18} /> Workspace
@@ -198,7 +207,7 @@ function ConnectPage({ accounts, refreshAccounts, accountBusy }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [message, setMessage] = useState("");
-  const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState("");
   const accountMap = useMemo(
     () => Object.fromEntries((accounts || []).map((account) => [account.platform, account])),
     [accounts],
@@ -206,33 +215,49 @@ function ConnectPage({ accounts, refreshAccounts, accountBusy }) {
   const connectedCount = accounts.filter((item) => item.connected).length;
 
   useEffect(() => {
-    const result = new URLSearchParams(location.search).get("youtube");
-    if (result === "connected") {
-      setMessage("YouTube connected successfully. Your channel is ready for approved uploads.");
-      refreshAccounts();
-      window.history.replaceState({}, "", window.location.pathname);
-    } else if (result === "denied") {
-      setMessage("YouTube permission was not granted. You can try again whenever you are ready.");
-      window.history.replaceState({}, "", window.location.pathname);
+    const params = new URLSearchParams(location.search);
+    for (const key of ["youtube", "instagram", "linkedin", "twitter"]) {
+      const result = params.get(key);
+      if (result === "connected") {
+        const name = PLATFORM_META[key]?.name || key;
+        setMessage(`${name} connected successfully.`);
+        refreshAccounts();
+        window.history.replaceState({}, "", window.location.pathname);
+        break;
+      }
+      if (result === "denied") {
+        const name = PLATFORM_META[key]?.name || key;
+        setMessage(`${name} permission was not granted. You can try again whenever you are ready.`);
+        window.history.replaceState({}, "", window.location.pathname);
+        break;
+      }
     }
   }, [location.search, refreshAccounts]);
 
-  const connectYouTube = () => {
-    window.open(apiUrl("/connect/youtube"), "_blank", "noopener,noreferrer");
-    setMessage("Finish Google authorization in the new tab, then return here.");
+  const connectAccount = (key) => {
+    const name = PLATFORM_META[key]?.name || key;
+    window.open(apiUrl(`/connect/${key}`), "_blank", "noopener,noreferrer");
+    setMessage(`Finish ${name} authorization in the new tab, then return here.`);
   };
 
-  const disconnectYouTube = async () => {
-    setDisconnecting(true);
+  const disconnectAccount = async (key) => {
+    setDisconnecting(key);
     try {
-      await creatorApi.disconnectYouTube();
-      setMessage("YouTube disconnected from this workspace.");
+      await creatorApi.disconnectAccount(key);
+      setMessage(`${PLATFORM_META[key]?.name || key} disconnected from this workspace.`);
       await refreshAccounts();
     } catch (error) {
       setMessage(error.message);
     } finally {
-      setDisconnecting(false);
+      setDisconnecting("");
     }
+  };
+
+  const connectCopy = {
+    youtube: "Authorize CreatorOS to upload only the Shorts you approve.",
+    instagram: "Connect Instagram to publish Reels you approve.",
+    linkedin: "Connect LinkedIn to post the drafts you approve.",
+    twitter: "Connect X to post threads you approve.",
   };
 
   return (
@@ -240,7 +265,7 @@ function ConnectPage({ accounts, refreshAccounts, accountBusy }) {
       <PageHeading
         eyebrow="Step 1 of 4"
         title="Connect your publishing channels"
-        description="Connect only what you need. You can change or disconnect an account at any time."
+        description="Connect YouTube, Instagram, LinkedIn, and X. You can change or disconnect an account at any time."
         aside={<div className="linked-count"><strong>{connectedCount}</strong> of 4 linked</div>}
       />
 
@@ -250,7 +275,7 @@ function ConnectPage({ accounts, refreshAccounts, accountBusy }) {
         {Object.entries(PLATFORM_META).map(([key, meta]) => {
           const account = accountMap[key] || { connected: false, status: "not_connected" };
           const Icon = platformIcons[key];
-          const available = key === "youtube";
+          const handle = account.display_name || account.username;
           return (
             <article className={`account-card ${account.connected ? "connected" : ""}`} key={key}>
               <div className="account-card-head">
@@ -268,29 +293,27 @@ function ConnectPage({ accounts, refreshAccounts, accountBusy }) {
                   <>
                     <div className="connected-detail">
                       <CheckCircle2 size={18} />
-                      <div><strong>Ready to publish</strong><span>Uploads default to private during testing</span></div>
+                      <div>
+                        <strong>{handle ? `Connected as ${handle}` : "Ready to publish"}</strong>
+                        <span>Posts stay private or draft until you approve them</span>
+                      </div>
                     </div>
                     <div className="card-actions">
-                      <button className="secondary-button" onClick={connectYouTube}>
+                      <button className="secondary-button" onClick={() => connectAccount(key)}>
                         <RefreshCw size={16} /> Change account
                       </button>
-                      <button className="danger-button" onClick={disconnectYouTube} disabled={disconnecting}>
-                        {disconnecting ? <LoaderCircle className="spin" size={16} /> : <Trash2 size={16} />}
+                      <button className="danger-button" onClick={() => disconnectAccount(key)} disabled={disconnecting === key}>
+                        {disconnecting === key ? <LoaderCircle className="spin" size={16} /> : <Trash2 size={16} />}
                         Disconnect
                       </button>
                     </div>
                   </>
-                ) : available ? (
-                  <>
-                    <p className="account-copy">Authorize CreatorOS to upload only the Shorts you approve.</p>
-                    <button className="primary-button compact" onClick={connectYouTube}>
-                      <Link2 size={16} /> Connect YouTube
-                    </button>
-                  </>
                 ) : (
                   <>
-                    <p className="account-copy">OAuth support for this platform is on the roadmap.</p>
-                    <button className="secondary-button" disabled>Coming soon</button>
+                    <p className="account-copy">{connectCopy[key]}</p>
+                    <button className="primary-button compact" onClick={() => connectAccount(key)}>
+                      <Link2 size={16} /> Connect {meta.name}
+                    </button>
                   </>
                 )}
               </div>
@@ -389,6 +412,22 @@ function CampaignPage({ campaign, setCampaign }) {
             </label>
           </Field>
         )}
+
+        <Field label="What kind of show is this?" hint="Comedy keeps the laugh. Interviews open on the bold line." wide>
+        <div className="show-types">
+          {SHOW_TYPES.map((item) => (
+            <button
+              type="button"
+              key={item.id}
+              className={(campaign.showType || "auto") === item.id ? "active" : ""}
+              onClick={() => update("showType", item.id)}
+            >
+              <strong>{item.label}</strong>
+              {item.detail ? <span>{item.detail}</span> : null}
+            </button>
+          ))}
+        </div>
+        </Field>
 
         <div className="form-grid">
           <Field label="Brand name">
@@ -505,19 +544,123 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
   );
 }
 
-function formatRemaining(progress, elapsed) {
-  if (!progress || progress < 4 || !elapsed) return "Estimating…";
-  const remaining = Math.max(0, (elapsed / progress) * (100 - progress));
-  if (remaining < 60) return "Less than a minute";
-  return `About ${Math.ceil(remaining / 60)} min`;
+function formatRemaining(status) {
+  const elapsed = status?.elapsed_seconds || 0;
+  const step = status?.step;
+  const scan = status?.scan_progress || {};
+  const typical = {
+    video: 90,
+    transcript: 240,
+    highlight: 20,
+    strategy: 40,
+    ranking: 20,
+    editing: 360,
+    routing: 20,
+    marketing: 90,
+    planning: 40,
+    packaging: 40,
+  };
+  const order = Object.keys(typical);
+  const idx = Math.max(0, order.indexOf(step));
+  let leftover = 0;
+  if (step === "transcript" && scan.max_scan_seconds) {
+    const heard = Number(scan.scanned_seconds) || 0;
+    const cap = Number(scan.max_scan_seconds) || 180;
+    leftover += Math.max(30, ((cap - heard) / cap) * typical.transcript);
+  } else {
+    leftover += typical[step] || 60;
+  }
+  for (let i = idx + 1; i < order.length; i += 1) leftover += typical[order[i]];
+  leftover = Math.max(30, leftover - Math.min(elapsed * 0.05, 30));
+  if (leftover < 60) return "Less than a minute";
+  return `About ${Math.ceil(leftover / 60)} min`;
 }
 
-function ProcessingPage({ currentJob, onComplete }) {
+function CalendarMonth({ calendar, onSelect }) {
+  const [selected, setSelected] = useState(null);
+  if (!calendar?.cells?.length) return null;
+  const chosen = calendar.cells.find((cell) => cell.date === selected) || null;
+
+  return (
+    <section className="panel calendar-panel" id="calendar">
+      <div className="section-heading">
+        <div>
+          <span className="overline">Blocked dates</span>
+          <h2>{calendar.label}</h2>
+        </div>
+        <span>{calendar.blocked_days} days reserved · {calendar.total_posts} posts</span>
+      </div>
+      <div className="calendar-legend">
+        {(calendar.legend || Object.entries(CALENDAR_PLATFORMS).map(([id, meta]) => ({ id, ...meta }))).map((item) => (
+          <span className="cal-chip" key={item.id || item.short}>
+            <BrandIcon platform={item.id} size={16} label={item.label} />
+            {item.label}
+          </span>
+        ))}
+      </div>
+      <div className="calendar-weekdays">
+        {(calendar.weekdays || ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]).map((day) => (
+          <span key={day}>{day}</span>
+        ))}
+      </div>
+      <div className="calendar-grid">
+        {calendar.cells.map((cell, index) => (
+          <button
+            type="button"
+            key={cell.date || `empty-${index}`}
+            className={`calendar-day ${cell.in_month ? "" : "empty"} ${cell.blocked ? "blocked" : ""} ${cell.today ? "today" : ""} ${selected === cell.date ? "selected" : ""}`}
+            disabled={!cell.in_month}
+            onClick={() => {
+              setSelected(cell.date);
+              onSelect?.(cell);
+            }}
+          >
+            <strong>{cell.day || ""}</strong>
+            {cell.blocked && (
+              <div className="calendar-markers">
+                {(cell.platforms || []).slice(0, 4).map((marker, markerIndex) => (
+                  <span className="cal-dot" key={`${cell.date}-${marker.id}-${markerIndex}`} title={marker.label}>
+                    <BrandIcon platform={marker.id} size={18} label={marker.label} />
+                  </span>
+                ))}
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+      {chosen?.items?.length > 0 && (
+        <div className="calendar-day-detail">
+          <strong>{chosen.date}</strong>
+          {chosen.items.map((item) => (
+            <div key={item.id}>
+              <span className="cal-chip">
+                <BrandIcon platform={item.marker?.id || item.platform} size={16} label={item.marker?.label} />
+                {item.marker?.label}
+              </span>
+              <em>{item.hook || "Scheduled post"}</em>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ProcessingPage({ currentJob, onComplete, plan, setPlan }) {
   const { jobId: paramJobId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const jobId = paramJobId || currentJob;
+  const stayOnProgress =
+    new URLSearchParams(location.search).get("view") === "progress";
   const [status, setStatus] = useState(null);
   const [pollError, setPollError] = useState("");
+  const [stopping, setStopping] = useState(false);
+  const [stopNote, setStopNote] = useState("");
+  const [scopeDraft, setScopeDraft] = useState(() => ({
+    instagram_reels: plan?.instagram_reels?.count ?? 2,
+    youtube_shorts: plan?.youtube_shorts?.count ?? 2,
+  }));
 
   useEffect(() => {
     if (!jobId) return undefined;
@@ -529,9 +672,11 @@ function ProcessingPage({ currentJob, onComplete }) {
         if (!active) return;
         setStatus(next);
         setPollError("");
-        if (next.status === "completed") {
+        if (next.status === "completed" || next.status === "stopped") {
           onComplete?.(jobId);
-          timer = setTimeout(() => navigate(`/complete/${jobId}`), 900);
+          if (!stayOnProgress) {
+            timer = setTimeout(() => navigate(`/complete/${jobId}`), 900);
+          }
         } else if (next.status !== "failed") {
           timer = setTimeout(poll, 2000);
         }
@@ -546,7 +691,54 @@ function ProcessingPage({ currentJob, onComplete }) {
       active = false;
       clearTimeout(timer);
     };
-  }, [jobId, navigate, onComplete]);
+  }, [jobId, navigate, onComplete, stayOnProgress]);
+
+  const live = status?.status === "running" || status?.status === "stopping" || status?.status === "queued";
+  const finished = status?.status === "completed" || status?.status === "stopped";
+  const scan = status?.scan_progress || {};
+
+  const applyFewer = async () => {
+    if (!jobId) return;
+    const nextPlan = {
+      instagram_reels: { count: Math.max(0, Number(scopeDraft.instagram_reels) || 0) },
+      youtube_shorts: { count: Math.max(0, Number(scopeDraft.youtube_shorts) || 0) },
+    };
+    setStopping(true);
+    try {
+      const result = await creatorApi.reduceScope(jobId, nextPlan);
+      setStopNote(result.message || "Later steps will use the smaller counts.");
+      if (setPlan && plan) {
+        setPlan({
+          ...plan,
+          instagram_reels: { ...plan.instagram_reels, count: nextPlan.instagram_reels.count },
+          youtube_shorts: { ...plan.youtube_shorts, count: nextPlan.youtube_shorts.count },
+        });
+      }
+    } catch (error) {
+      setStopNote(error.message);
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const stopRun = async (mode) => {
+    if (!jobId) return;
+    setStopping(true);
+    try {
+      const result = await creatorApi.stopJob(jobId, {
+        mode,
+        plan: {
+          instagram_reels: { count: Math.max(0, Number(scopeDraft.instagram_reels) || 0) },
+          youtube_shorts: { count: Math.max(0, Number(scopeDraft.youtube_shorts) || 0) },
+        },
+      });
+      setStopNote(result.message || "Stop requested.");
+    } catch (error) {
+      setStopNote(error.message);
+    } finally {
+      setStopping(false);
+    }
+  };
 
   if (!jobId) return <Navigate to="/strategy" replace />;
 
@@ -558,9 +750,37 @@ function ProcessingPage({ currentJob, onComplete }) {
     <AppShell step="processing">
       <PageHeading
         eyebrow={`Campaign ${jobId.slice(0, 8)}`}
-        title={status?.status === "completed" ? "Your campaign is ready" : "Building your campaign"}
-        description={status?.status === "completed" ? "Every asset has been edited, written, scheduled, and packaged." : "You can leave this page open—we’ll keep every stage visible while CreatorOS works."}
-        aside={<div className="live-badge"><span /> Live processing</div>}
+        title={
+          status?.status === "stopped"
+            ? "Campaign stopped early"
+            : status?.status === "completed"
+              ? "Your campaign is ready"
+              : status?.status === "stopping"
+                ? "Winding this campaign down"
+                : "Building your campaign"
+        }
+        description={
+          status?.status === "stopped"
+            ? status.message || "CreatorOS kept whatever it already finished and skipped the rest."
+            : status?.status === "completed"
+              ? "Every asset has been edited, written, scheduled, and packaged."
+              : "You can leave this page open, reduce the counts, or stop the run once you have enough clips."
+        }
+        aside={
+          <div className="heading-actions">
+            {stayOnProgress && finished && (
+              <button
+                className="secondary-button"
+                onClick={() => navigate(`/complete/${jobId}`)}
+              >
+                <ArrowLeft size={16} /> Back to summary
+              </button>
+            )}
+            <div className="live-badge">
+              <span /> {finished ? (status?.status === "stopped" ? "Stopped" : "Completed") : status?.status === "stopping" ? "Stopping" : "Live processing"}
+            </div>
+          </div>
+        }
       />
       <section className="processing-hero">
         <div className="progress-summary">
@@ -570,15 +790,22 @@ function ProcessingPage({ currentJob, onComplete }) {
           <div className="progress-copy">
             <span className="overline">Working now</span>
             <h2>{status?.step_label || "Preparing the campaign"}</h2>
-            <p>{activeStep?.description || "CreatorOS is getting the workspace ready."}</p>
+            <p>
+              {scan.label || activeStep?.description || "CreatorOS is getting the workspace ready."}
+              {scan.max_scan_seconds
+                ? ` · chunked scan, at most ${Math.round(scan.max_scan_seconds / 60)} min of the talk`
+                : ""}
+            </p>
             <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
             <div className="progress-meta">
               <span><Clock3 size={15} /> Elapsed: {status?.elapsed_human || "0s"}</span>
-              <span><Zap size={15} /> Remaining: {formatRemaining(progress, status?.elapsed_seconds)}</span>
+              <span><Zap size={15} /> Remaining: {live ? formatRemaining(status) : "Done"}</span>
             </div>
           </div>
         </div>
         {status?.status === "failed" && <Notice>{status.error || "The campaign stopped unexpectedly."}</Notice>}
+        {status?.status === "stopped" && <Notice>{status.message || "The run was stopped. Anything already cut is in the campaign library."}</Notice>}
+        {stopNote && <Notice>{stopNote}</Notice>}
         {pollError && <Notice>Connection interrupted: {pollError}. Retrying automatically…</Notice>}
       </section>
 
@@ -595,13 +822,49 @@ function ProcessingPage({ currentJob, onComplete }) {
                     {state === "done" ? <Check size={16} /> : state === "active" ? <LoaderCircle className="spin" size={17} /> : index + 1}
                   </div>
                   <div className="timeline-copy"><strong>{item.label}</strong><span>{item.description}</span></div>
-                  <div className="timeline-state">{state === "done" ? "Done" : state === "active" ? "In progress" : state === "error" ? "Needs attention" : "Waiting"}</div>
+                  <div className="timeline-state">
+                    {state === "done" ? "Done" : state === "active" ? "In progress" : state === "error" ? "Needs attention" : state === "skipped" ? "Skipped" : "Waiting"}
+                  </div>
                 </div>
               );
             })}
           </div>
         </section>
         <aside className="processing-side">
+          {live && (
+            <div className="panel compact-panel stop-panel">
+              <div className="summary-title"><Ban size={18} /><span>Need fewer posts?</span></div>
+              <p>If 5 Reels was too many, drop the counts now. The editor will only cut what you still want.</p>
+              <div className="stop-counts">
+                <label>
+                  Reels
+                  <input
+                    type="number"
+                    min="0"
+                    max="12"
+                    value={scopeDraft.instagram_reels}
+                    onChange={(e) => setScopeDraft({ ...scopeDraft, instagram_reels: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Shorts
+                  <input
+                    type="number"
+                    min="0"
+                    max="12"
+                    value={scopeDraft.youtube_shorts}
+                    onChange={(e) => setScopeDraft({ ...scopeDraft, youtube_shorts: e.target.value })}
+                  />
+                </label>
+              </div>
+              <button className="secondary-button full" disabled={stopping} onClick={applyFewer}>
+                {stopping ? <LoaderCircle className="spin" size={16} /> : <Square size={16} />} Keep only these
+              </button>
+              <button className="danger-button full" disabled={stopping} onClick={() => stopRun("finish_current")}>
+                {stopping ? <LoaderCircle className="spin" size={16} /> : <Ban size={16} />} Stop after this step
+              </button>
+            </div>
+          )}
           <div className="panel compact-panel">
             <div className="summary-title"><Film size={18} /><span>Quality checks</span></div>
             <ul className="check-list">
@@ -667,6 +930,12 @@ function CompletionPage({ currentJob }) {
           <button className="primary-button" onClick={() => navigate(`/results/${resolvedJob}`)}>
             Open campaign library <ArrowRight size={17} />
           </button>
+          <button
+            className="secondary-button"
+            onClick={() => navigate(`/processing/${resolvedJob}?view=progress`)}
+          >
+            <ArrowLeft size={16} /> View final progress
+          </button>
           {resolvedJob && (
             <a className="secondary-button" href={apiUrl(`/download-campaign/${resolvedJob}`)}>
               <Download size={16} /> Download package
@@ -676,6 +945,8 @@ function CompletionPage({ currentJob }) {
       </section>
 
       {error && <Notice>{error}</Notice>}
+
+      <CalendarMonth calendar={board?.calendar} />
 
       <div className="completion-kpis">
         <div className="completion-kpi">
@@ -817,7 +1088,28 @@ function ResultsPage({ currentJob }) {
         eyebrow="Campaign complete"
         title="Review your campaign"
         description="Preview the edits, approve the copy, and download the complete package."
-        aside={resolvedJob && <a className="primary-button" href={apiUrl(`/download-campaign/${resolvedJob}`)}><Download size={17} /> Download campaign</a>}
+        aside={
+          <div className="heading-actions">
+            <button
+              className="secondary-button"
+              onClick={() =>
+                resolvedJob
+                  ? navigate(`/complete/${resolvedJob}`)
+                  : navigate(-1)
+              }
+            >
+              <ArrowLeft size={16} /> Back to summary
+            </button>
+            {resolvedJob && (
+              <a
+                className="primary-button"
+                href={apiUrl(`/download-campaign/${resolvedJob}`)}
+              >
+                <Download size={17} /> Download campaign
+              </a>
+            )}
+          </div>
+        }
       />
       {error && <Notice>{error}</Notice>}
       <div className="result-kpis">
@@ -836,7 +1128,9 @@ function ResultsPage({ currentJob }) {
       {!board ? (
         <div className="loading-state"><LoaderCircle className="spin" /><span>Loading campaign assets…</span></div>
       ) : (
-        <div className="asset-grid">
+        <>
+          <CalendarMonth calendar={board.calendar} />
+          <div className="asset-grid">
           {visible.map((item, index) => (
             <article className="asset-card" key={item.id || `${item.assigned_platform}-${index}`}>
               {item.play_url ? (
@@ -852,7 +1146,8 @@ function ResultsPage({ currentJob }) {
               </div>
             </article>
           ))}
-        </div>
+          </div>
+        </>
       )}
     </AppShell>
   );
@@ -972,6 +1267,7 @@ function CreatorApp() {
           goal: campaign.goal,
           audience: campaign.audience,
           tone: campaign.tone,
+          show_type: campaign.showType || "auto",
           campaign_duration_days: campaign.durationDays,
           campaign_start_date: campaign.startDate,
         },
@@ -993,7 +1289,7 @@ function CreatorApp() {
       <Route path="/" element={<ConnectPage accounts={accounts} refreshAccounts={refreshAccounts} accountBusy={accountBusy} />} />
       <Route path="/campaign" element={<CampaignPage campaign={campaign} setCampaign={setCampaign} />} />
       <Route path="/strategy" element={<StrategyPage campaign={campaign} plan={plan} setPlan={setPlan} onGenerate={generate} generating={generating} />} />
-      <Route path="/processing/:jobId?" element={<ProcessingPage currentJob={currentJob} onComplete={setCurrentJob} />} />
+      <Route path="/processing/:jobId?" element={<ProcessingPage currentJob={currentJob} onComplete={setCurrentJob} plan={plan} setPlan={setPlan} />} />
       <Route path="/complete/:jobId" element={<CompletionPage currentJob={currentJob} />} />
       <Route path="/results/:jobId" element={<ResultsPage currentJob={currentJob} />} />
       <Route path="*" element={<Navigate to="/" replace />} />

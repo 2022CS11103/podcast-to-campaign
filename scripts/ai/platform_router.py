@@ -41,6 +41,23 @@ ANGLE_LABELS = {
 }
 
 
+def campaign_start():
+    """Day one of the calendar: the creator's chosen date, else today."""
+    brand_file = PROJECT_ROOT / "brand_context.json"
+    if brand_file.exists():
+        try:
+            with open(brand_file, "r", encoding="utf-8") as f:
+                brand = json.load(f) or {}
+            raw = (brand.get("campaign_start_date") or "").strip()
+            if raw:
+                chosen = datetime.strptime(raw[:10], "%Y-%m-%d")
+                today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                return max(chosen, today)
+        except (OSError, ValueError, TypeError):
+            pass
+    return datetime.now()
+
+
 def get_content_angle(clip):
     scores = clip.get("scores", {}) or {}
     if not scores:
@@ -204,7 +221,7 @@ def main():
     used_ids = set()
     items = []
     item_counter = 1
-    today = datetime.now()
+    today = campaign_start()
 
     video_picks = assign_distinct_video_slots(clips, plan)
     ordered_platforms = [p for p in plan.keys() if p in VIDEO_PLATFORMS]
@@ -285,7 +302,8 @@ def main():
             )
 
     content_bank = {
-        "generated_at": today.strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "campaign_start_date": today.strftime("%Y-%m-%d"),
         "requested_plan": plan,
         "total_requested": sum(int(p.get("count", 0)) for p in plan.values()),
         "video_renders": unique_renders,

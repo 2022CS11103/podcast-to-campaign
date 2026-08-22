@@ -38,6 +38,7 @@ class ProcessRequest(BaseModel):
             ("audience", "audience"),
             ("target_audience", "audience"),
             ("tone", "tone"),
+            ("show_type", "show_type"),
             ("campaign_duration_days", "campaign_duration_days"),
             ("posting_duration_days", "campaign_duration_days"),
             ("campaign_start_date", "campaign_start_date"),
@@ -64,10 +65,14 @@ class StatusResponse(BaseModel):
     progress_percent: Optional[int] = None
     steps: Optional[list] = None
     error: Optional[str] = None
+    message: Optional[str] = None
     result: Optional[dict] = None
     elapsed_seconds: Optional[float] = None
     elapsed_human: Optional[str] = None
     timing: Optional[dict] = None
+    stop_requested: Optional[bool] = None
+    stop_mode: Optional[str] = None
+    scan_progress: Optional[dict] = None
 
 
 class PerformanceRequest(BaseModel):
@@ -85,6 +90,17 @@ class RepostRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
     platform: Optional[str] = None
     days: Optional[int] = None
+
+
+class StopJobRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    mode: Literal["finish_current", "now"] = "finish_current"
+    plan: Optional[Dict[str, Any]] = None
+
+
+class ScopeJobRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    plan: Dict[str, Any]
 
 
 class YouTubeUploadRequest(BaseModel):

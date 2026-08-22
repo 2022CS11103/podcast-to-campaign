@@ -1,4 +1,5 @@
 import queue
+import os
 import threading
 import subprocess
 import sys
@@ -15,6 +16,17 @@ from utils.pipeline_timer import reset as reset_timer, log_step, finish, snapsho
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 task_queue = queue.Queue()
+
+VIDEO_PLATFORMS = ("youtube_shorts", "instagram_reels", "tiktok")
+
+
+class JobStopped(Exception):
+    """Raised at a checkpoint when the creator asked the run to wind down."""
+
+    def __init__(self, mode: str, stage: str):
+        super().__init__(f"stopped before {stage}")
+        self.mode = mode
+        self.stage = stage
 
 
 def _public_error(exc: Exception) -> str:
@@ -57,16 +69,23 @@ def _wipe_output_dirs(names):
 
 
 def _run_script(script: str):
+    env = {
+        **os.environ,
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+        "PYTHONUNBUFFERED": "1",
+    }
     result = subprocess.run(
-        [sys.executable, script],
+        [sys.executable, "-u", script],
         cwd=str(PROJECT_ROOT),
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
     )
     if result.stdout:
-        print(result.stdout)
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n", flush=True)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"{script} failed:\n{detail[-2500:]}")
@@ -89,12 +108,187 @@ def _timed(job_id, name, fn):
         job_manager.update(job_id, timing=timing)
 
 
+def _checkpoint(job_id, stage):
+    """Wind down here if a stop was requested during the previous stage."""
+    mode = job_manager.stop_request(job_id)
+    if mode:
+        print(f"\n🛑 stop requested ({mode}) — winding down before {stage}")
+        raise JobStopped(mode, stage)
+
+
+def _write_plan(plan: dict) -> dict:
+    plan = normalize_plan(plan or {})
+    with open(PROJECT_ROOT / "content_plan.json", "w", encoding="utf-8") as f:
+        json.dump(plan, f, indent=2)
+    return plan
+
+
+def _reduce_plan(plan: dict, override: dict) -> dict:
+    """Apply a scope change, allowing reductions only.
+
+    Raising counts mid-run would need clips that were never cut, so a bigger
+    number is treated as "leave it alone".
+    """
+    if not override:
+        return plan
+    revised = {}
+    for platform, config in (plan or {}).items():
+        wanted = (override or {}).get(platform)
+        count = int(config.get("count", 0) or 0)
+        if isinstance(wanted, dict) and wanted.get("count") is not None:
+            try:
+                count = min(count, max(0, int(wanted["count"])))
+            except (TypeError, ValueError):
+                pass
+        elif isinstance(wanted, (int, float, str)):
+            try:
+                count = min(count, max(0, int(wanted)))
+            except (TypeError, ValueError):
+                pass
+        revised[platform] = {**config, "count": count}
+    return normalize_plan(revised)
+
+
+def _apply_scope(job_id, plan):
+    override = job_manager.scope_override(job_id)
+    if not override:
+        return plan
+    reduced = _reduce_plan(plan, override)
+    if reduced != plan:
+        print(f"\n✂  scope reduced mid-run: "
+              f"{ {k: v['count'] for k, v in reduced.items()} }")
+        return _write_plan(reduced)
+    return plan
+
+
+def _rendered_shorts():
+    folder = PROJECT_ROOT / "output" / "final_shorts"
+    return sorted(folder.glob("short_*.mp4")) if folder.exists() else []
+
+
+def _cap_plan_to_renders(plan):
+    """A stopped run publishes what it actually cut, not what it promised."""
+    renders = len(_rendered_shorts())
+    revised = {}
+    for platform, config in (plan or {}).items():
+        count = int(config.get("count", 0) or 0)
+        if platform in VIDEO_PLATFORMS:
+            count = min(count, renders)
+        revised[platform] = {**config, "count": count}
+    return normalize_plan(revised)
+
+
+def _package(job_id):
+    for old_zip in (PROJECT_ROOT / "output").glob("campaign_*.zip"):
+        old_zip.unlink()
+    tmp_zip_base = PROJECT_ROOT / f"campaign_{job_id[:8]}"
+    shutil.make_archive(str(tmp_zip_base), "zip", str(PROJECT_ROOT / "output"))
+    final_zip_path = PROJECT_ROOT / "output" / f"campaign_{job_id[:8]}.zip"
+    shutil.move(str(tmp_zip_base) + ".zip", str(final_zip_path))
+    return str(final_zip_path)
+
+
+def _build_result(zip_path, timing, content_plan, stopped_at=None):
+    result = {
+        "clips_path": str(PROJECT_ROOT / "output" / "clips.json"),
+        "shorts_folder": str(PROJECT_ROOT / "output" / "final_shorts"),
+        "marketing_folder": str(PROJECT_ROOT / "output"),
+        "content_bank": str(PROJECT_ROOT / "output" / "content_bank.json"),
+        "campaign_calendar": str(PROJECT_ROOT / "output" / "campaign_calendar.md"),
+        "campaign_summary": str(PROJECT_ROOT / "output" / "campaign_summary.json"),
+        "strategy_brief": str(PROJECT_ROOT / "output" / "strategy_brief.txt"),
+        "package_manifest": str(PROJECT_ROOT / "output" / "package_manifest.json"),
+        "timing_report": str(PROJECT_ROOT / "output" / "timing_report.json"),
+        "edit_quality": str(PROJECT_ROOT / "output" / "edit_quality.json"),
+        "campaign_zip": zip_path,
+        "studio_url": "/studio",
+        "cost_report": generate_report(),
+        "timing": timing,
+        "elapsed_seconds": timing["total_seconds"],
+        "elapsed_human": timing["total_human"],
+        "plan_locked": plan_is_usable(content_plan),
+    }
+    if stopped_at:
+        result["stopped_at_step"] = stopped_at
+        result["partial"] = True
+    return result
+
+
+def _wind_down(job_id, stopped: JobStopped, content_plan, done_stages):
+    """Publish what the run already produced instead of throwing it away."""
+    shorts = _rendered_shorts()
+    if stopped.mode == "now" or not shorts:
+        reason = (
+            "Stopped before any clip finished rendering, so there is nothing to publish."
+            if not shorts else
+            "Run cancelled. Nothing was published."
+        )
+        timing = finish(ok=False)
+        job_manager.update(
+            job_id,
+            status="stopped",
+            step=stopped.stage,
+            stopped_at_step=stopped.stage,
+            error=None,
+            message=reason,
+            timing=timing,
+            finished_at=time.time(),
+        )
+        print(f"\n🛑 {reason}")
+        return
+
+    print(f"\n🛑 wrapping up with {len(shorts)} finished cut(s)")
+    plan = _write_plan(_cap_plan_to_renders(content_plan))
+    try:
+        if "routing" not in done_stages:
+            _timed(job_id, "routing", lambda: _run_script("scripts/ai/platform_router.py"))
+        if "marketing" not in done_stages:
+            _timed(job_id, "marketing", CreatorOS().marketing.run)
+        if "planning" not in done_stages:
+            _timed(job_id, "planning", lambda: (
+                _run_script("scripts/ai/campaign_planner.py"),
+                _run_script("scripts/ai/campaign_summary.py"),
+                _run_script("scripts/ai/package_manifest.py"),
+            ))
+        zip_path = _timed(job_id, "packaging", lambda: _package(job_id))
+        timing = finish(ok=True)
+        result = _build_result(zip_path, timing, plan, stopped_at=stopped.stage)
+        job_manager.update(
+            job_id,
+            status="stopped",
+            step="done",
+            stopped_at_step=stopped.stage,
+            message=(
+                f"Stopped early and packaged {len(shorts)} finished cut(s). "
+                "Everything already rendered is in the campaign library."
+            ),
+            result=result,
+            timing=timing,
+            finished_at=time.time(),
+        )
+        print(f"\n🛑 stopped early — packaged {len(shorts)} cut(s)")
+    except Exception as exc:
+        timing = finish(ok=False)
+        job_manager.update(
+            job_id,
+            status="stopped",
+            step=stopped.stage,
+            stopped_at_step=stopped.stage,
+            message="Stopped early. Packaging the partial campaign failed.",
+            error=_public_error(exc),
+            timing=timing,
+            finished_at=time.time(),
+        )
+
+
 def _worker():
     while True:
         job_id, source, content_plan, brand_context = task_queue.get()
+        done_stages = set()
         try:
             reset_log()
             reset_timer()
+            job_manager.clear_stop_flag()
             job_manager.update(job_id, started_at=time.time(), timing=snapshot())
 
             # Wipe scratch folders now. Keep last campaign's playable
@@ -106,63 +300,42 @@ def _worker():
                 with open(brand_file, "w", encoding="utf-8") as f:
                     json.dump(brand_context, f, indent=2)
 
-            content_plan = normalize_plan(content_plan or {})
-            content_plan_file = PROJECT_ROOT / "content_plan.json"
-            with open(content_plan_file, "w", encoding="utf-8") as f:
-                json.dump(content_plan, f, indent=2)
+            content_plan = _write_plan(content_plan)
 
             creator = CreatorOS()
 
             job_manager.update(job_id, status="running", step="video")
-            _timed(job_id, "video", lambda: creator.video.run(source))
-            _timed(job_id, "transcript", creator.transcript.run)
-            _timed(job_id, "highlight", creator.highlight.run)
-            _timed(job_id, "strategy", lambda: _run_script("scripts/ai/strategy_agent.py"))
-            _timed(job_id, "ranking", lambda: _run_script("scripts/ai/clip_ranker.py"))
-            _wipe_output_dirs(RENDER_DIRS)
-            _timed(job_id, "editing", creator.editor.run)
-            _timed(job_id, "routing", lambda: _run_script("scripts/ai/platform_router.py"))
-            _timed(job_id, "marketing", creator.marketing.run)
-            _timed(job_id, "planning", lambda: (
-                _run_script("scripts/ai/campaign_planner.py"),
-                _run_script("scripts/ai/campaign_summary.py"),
-                _run_script("scripts/ai/package_manifest.py"),
-            ))
+            stages = [
+                ("video", lambda: creator.video.run(source)),
+                ("transcript", creator.transcript.run),
+                ("highlight", creator.highlight.run),
+                ("strategy", lambda: _run_script("scripts/ai/strategy_agent.py")),
+                ("ranking", lambda: _run_script("scripts/ai/clip_ranker.py")),
+                ("editing", creator.editor.run),
+                ("routing", lambda: _run_script("scripts/ai/platform_router.py")),
+                ("marketing", creator.marketing.run),
+                ("planning", lambda: (
+                    _run_script("scripts/ai/campaign_planner.py"),
+                    _run_script("scripts/ai/campaign_summary.py"),
+                    _run_script("scripts/ai/package_manifest.py"),
+                )),
+            ]
 
-            def _package():
-                for old_zip in (PROJECT_ROOT / "output").glob("campaign_*.zip"):
-                    old_zip.unlink()
-                tmp_zip_base = PROJECT_ROOT / f"campaign_{job_id[:8]}"
-                shutil.make_archive(str(tmp_zip_base), "zip", str(PROJECT_ROOT / "output"))
-                final_zip_path = PROJECT_ROOT / "output" / f"campaign_{job_id[:8]}.zip"
-                shutil.move(str(tmp_zip_base) + ".zip", str(final_zip_path))
-                return str(final_zip_path)
+            for name, fn in stages:
+                _checkpoint(job_id, name)
+                content_plan = _apply_scope(job_id, content_plan)
+                if name == "editing":
+                    _wipe_output_dirs(RENDER_DIRS)
+                _timed(job_id, name, fn)
+                done_stages.add(name)
 
-            zip_path = _timed(job_id, "packaging", _package)
+            _checkpoint(job_id, "packaging")
+            zip_path = _timed(job_id, "packaging", lambda: _package(job_id))
 
             timing = finish(ok=True)
             _run_script("scripts/ai/campaign_summary.py")
             _run_script("scripts/ai/package_manifest.py")
-            cost_report = generate_report()
-
-            result = {
-                "clips_path": str(PROJECT_ROOT / "output" / "clips.json"),
-                "shorts_folder": str(PROJECT_ROOT / "output" / "final_shorts"),
-                "marketing_folder": str(PROJECT_ROOT / "output"),
-                "content_bank": str(PROJECT_ROOT / "output" / "content_bank.json"),
-                "campaign_calendar": str(PROJECT_ROOT / "output" / "campaign_calendar.md"),
-                "campaign_summary": str(PROJECT_ROOT / "output" / "campaign_summary.json"),
-                "strategy_brief": str(PROJECT_ROOT / "output" / "strategy_brief.txt"),
-                "package_manifest": str(PROJECT_ROOT / "output" / "package_manifest.json"),
-                "timing_report": str(PROJECT_ROOT / "output" / "timing_report.json"),
-                "campaign_zip": zip_path,
-                "studio_url": "/studio",
-                "cost_report": cost_report,
-                "timing": timing,
-                "elapsed_seconds": timing["total_seconds"],
-                "elapsed_human": timing["total_human"],
-                "plan_locked": plan_is_usable(content_plan),
-            }
+            result = _build_result(zip_path, timing, content_plan)
 
             print(f"\n⏱  CAMPAIGN TOTAL: {timing['total_human']}")
             for step in timing["steps"]:
@@ -177,6 +350,8 @@ def _worker():
                 finished_at=time.time(),
             )
 
+        except JobStopped as stopped:
+            _wind_down(job_id, stopped, content_plan, done_stages)
         except Exception as e:
             timing = finish(ok=False)
             job_manager.update(

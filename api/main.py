@@ -17,6 +17,8 @@ from api.schemas import (
     RepostRequest,
     RecommendPlanRequest,
     YouTubeUploadRequest,
+    StopJobRequest,
+    ScopeJobRequest,
 )
 from api.job_manager import job_manager
 from api.pipeline_runner import start_worker, enqueue_job
@@ -31,6 +33,8 @@ from scripts.ai.ab_engine import (
 from config.platform_specs import PLATFORM_SPECS, CANDIDATE_TARGET_SECONDS
 from utils.pipeline_timer import format_duration, snapshot as timing_snapshot
 from utils.pipeline_steps import describe_step
+from utils.campaign_calendar import from_bank as calendar_from_bank
+from utils.content_plan import normalize_plan, load_plan, save_plan
 from utils.youtube_oauth import (
     authorization_url as youtube_authorization_url,
     configured as youtube_oauth_configured,
@@ -38,6 +42,13 @@ from utils.youtube_oauth import (
     disconnect as disconnect_youtube,
     exchange_callback as exchange_youtube_callback,
     upload_video as upload_youtube_video,
+)
+from utils.social_oauth import (
+    all_statuses as social_account_statuses,
+    authorization_url as social_authorization_url,
+    configured as social_oauth_configured,
+    disconnect as disconnect_social,
+    exchange_callback as exchange_social_callback,
 )
 
 app = FastAPI(title="CreatorOS API")
@@ -63,11 +74,18 @@ MEDIA_FOLDERS = {
     "final_shorts", "youtube_shorts", "instagram_reels", "tiktok", "posts",
 }
 
-DISCONNECTED_ACCOUNTS = [
-    {"platform": "instagram", "label": "Instagram", "status": "not_connected", "connected": False},
-    {"platform": "linkedin", "label": "LinkedIn", "status": "not_connected", "connected": False},
-    {"platform": "twitter", "label": "Twitter/X", "status": "not_connected", "connected": False},
-]
+def _merge_scope(current: dict, override: dict) -> dict:
+    merged = dict(current or {})
+    for platform, config in (override or {}).items():
+        base = dict(merged.get(platform) or {})
+        if isinstance(config, dict):
+            base.update(config)
+        else:
+            base["count"] = config
+        merged[platform] = base
+    return merged
+
+
 
 
 @app.on_event("startup")
@@ -292,20 +310,22 @@ def campaign_board():
             "audio_visual" if scan.get("visual_analysis") else "audio_first"
         ),
         "items": items,
+        "calendar": calendar_from_bank({**bank, "items": items}) if items else None,
     }
 
 
 def _accounts_payload():
     youtube = youtube_connection_status()
-    accounts = [youtube, *DISCONNECTED_ACCOUNTS]
+    accounts = [youtube, *social_account_statuses()]
+    linked = [row for row in accounts if row.get("connected")]
     return {
         "accounts": accounts,
-        "connected": any(account.get("connected") for account in accounts),
+        "connected": bool(linked),
         "can_skip": True,
         "message": (
-            "YouTube connected. You can upload an approved Short."
-            if youtube.get("connected")
-            else "No accounts linked. Connect YouTube or generate a downloadable campaign package."
+            f"{len(linked)} channel(s) connected."
+            if linked
+            else "No accounts linked. Connect a channel or generate a downloadable campaign package."
         ),
     }
 
@@ -432,15 +452,54 @@ def youtube_upload(req: YouTubeUploadRequest):
 
 
 @app.get("/connect/{platform}")
-@app.post("/connect/{platform}")
-def connect_stub(platform: str):
-    raise HTTPException(
-        status_code=501,
-        detail=(
-            f"{platform} OAuth is not implemented yet. "
-            "Do not mark this account connected; the user can skip this platform."
-        ),
-    )
+def connect_platform(platform: str):
+    key = (platform or "").strip().lower()
+    if key == "youtube":
+        return connect_youtube()
+    if key not in ("instagram", "linkedin", "twitter"):
+        raise HTTPException(status_code=404, detail="Unknown platform.")
+    if not social_oauth_configured(key):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"{key.title()} OAuth is not configured. "
+                "Add the app id, secret, and redirect URI to .env, restart the server, then try Connect again."
+            ),
+        )
+    try:
+        return RedirectResponse(social_authorization_url(key), status_code=302)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/oauth/{platform}/callback")
+def social_callback(platform: str, code: str = "", state: str = "", error: str = ""):
+    key = (platform or "").strip().lower()
+    if key == "youtube":
+        return youtube_callback(code=code, state=state, error=error)
+    if key not in ("instagram", "linkedin", "twitter"):
+        raise HTTPException(status_code=404, detail="Unknown platform.")
+    if error:
+        return RedirectResponse(f"{PUBLIC_FRONTEND_URL}?{key}=denied", status_code=302)
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="OAuth callback is missing code or state.")
+    try:
+        exchange_social_callback(key, code, state)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return RedirectResponse(f"{PUBLIC_FRONTEND_URL}?{key}=connected", status_code=302)
+
+
+@app.post("/disconnect/{platform}")
+def disconnect_platform(platform: str):
+    key = (platform or "").strip().lower()
+    if key == "youtube":
+        disconnect_youtube()
+    elif key in ("instagram", "linkedin", "twitter"):
+        disconnect_social(key)
+    else:
+        raise HTTPException(status_code=404, detail="Unknown platform.")
+    return {"status": "disconnected", **_accounts_payload()}
 
 
 @app.post("/process", response_model=ProcessResponse)
@@ -474,6 +533,14 @@ def get_status(job_id: str):
             elapsed = live.get("total_seconds") or elapsed
 
     ui = describe_step(job["step"], job["status"])
+    scan_progress = None
+    progress_file = PROJECT_ROOT / "output" / "scan_progress.json"
+    if job["status"] in ("running", "stopping") and progress_file.exists():
+        try:
+            with open(progress_file, "r", encoding="utf-8") as f:
+                scan_progress = json.load(f)
+        except (OSError, ValueError):
+            scan_progress = None
 
     return StatusResponse(
         job_id=job["job_id"],
@@ -483,17 +550,69 @@ def get_status(job_id: str):
         step_label=ui["step_label"],
         progress_percent=ui["progress_percent"],
         steps=ui["steps"],
-        error=job["error"],
-        result=job["result"],
+        error=job.get("error"),
+        message=job.get("message"),
+        result=job.get("result"),
         elapsed_seconds=round(elapsed, 2) if elapsed else 0,
         elapsed_human=format_duration(elapsed) if elapsed else "0s",
         timing=timing,
+        stop_requested=bool(job.get("stop_requested")),
+        stop_mode=job.get("stop_mode"),
+        scan_progress=scan_progress,
     )
 
 
 @app.get("/jobs")
 def list_jobs():
     return job_manager.list_jobs()
+
+
+@app.post("/jobs/{job_id}/stop")
+def stop_job(job_id: str, req: StopJobRequest | None = None):
+    req = req or StopJobRequest()
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") not in ("queued", "running", "stopping"):
+        return {
+            "job_id": job_id,
+            "status": job.get("status"),
+            "message": "This campaign is already finished.",
+        }
+    if req.plan:
+        merged = _merge_scope(load_plan(required=False), req.plan)
+        save_plan(merged)
+        job_manager.set_scope(job_id, req.plan)
+    updated = job_manager.request_stop(job_id, req.mode)
+    return {
+        "job_id": job_id,
+        "status": updated.get("status") if updated else "stopping",
+        "stop_mode": req.mode,
+        "message": (
+            "Stopping after the current step, then packaging whatever is already cut."
+            if req.mode == "finish_current"
+            else "Stop requested. The current slice will finish, then the run winds down."
+        ),
+    }
+
+
+@app.post("/jobs/{job_id}/scope")
+def reduce_job_scope(job_id: str, req: ScopeJobRequest):
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") not in ("queued", "running", "stopping"):
+        raise HTTPException(status_code=409, detail="This campaign is already finished.")
+    current = load_plan(required=False) or {}
+    merged = _merge_scope(current, req.plan)
+    save_plan(merged)
+    job_manager.set_scope(job_id, req.plan)
+    return {
+        "job_id": job_id,
+        "status": job.get("status"),
+        "plan": load_plan(required=False),
+        "message": "Later steps will only produce the counts you kept.",
+    }
 
 
 @app.get("/next-scheduled-post")
@@ -532,18 +651,25 @@ def get_timing():
 
 
 @app.get("/campaign-calendar")
-def get_campaign_calendar():
-    calendar_file = PROJECT_ROOT / "output" / "campaign_calendar.md"
-    if not calendar_file.exists():
+def get_campaign_calendar(year: int | None = None, month: int | None = None):
+    if not CONTENT_BANK.exists():
         raise HTTPException(status_code=404, detail="Campaign calendar not found")
-    with open(calendar_file, "r", encoding="utf-8") as f:
-        return {"calendar_markdown": f.read()}
+    with open(CONTENT_BANK, "r", encoding="utf-8") as f:
+        bank = json.load(f)
+    markdown = ""
+    calendar_file = PROJECT_ROOT / "output" / "campaign_calendar.md"
+    if calendar_file.exists():
+        markdown = calendar_file.read_text(encoding="utf-8")
+    return {
+        "calendar_markdown": markdown,
+        "calendar": calendar_from_bank(bank, year=year, month=month),
+    }
 
 
 @app.get("/download-campaign/{job_id}")
 def download_campaign(job_id: str):
     job = job_manager.get(job_id)
-    if job is None or job["status"] != "completed":
+    if job is None or job["status"] not in ("completed", "stopped"):
         raise HTTPException(status_code=404, detail="Campaign not ready or not found")
 
     zip_path = job["result"].get("campaign_zip")

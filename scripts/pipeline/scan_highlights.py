@@ -23,17 +23,19 @@ from config.platform_specs import (
     MIN_OVERALL_SCORE,
     USABLE_SCORE_FLOOR,
     SCAN_WINDOW_SECONDS,
-    WHISPER_SLICE_SECONDS,
+    SCAN_OVERLAP_SECONDS,
     CANDIDATES_PER_WINDOW,
     MAX_SCAN_SECONDS,
+    HARD_MAX_SCAN_SECONDS,
     VIDEO_ANALYSIS_ENABLED,
     video_clip_demand,
     largest_video_count,
 )
 from utils.content_plan import load_plan, plan_is_usable
 from utils.cost_tracker import log_whisper_time
-from scripts.pipeline.transcribe_backend import transcribe_wav_file
+from scripts.pipeline.transcribe_backend import close_worker, transcribe_wav_file
 from scripts.pipeline.chunk_transcript import build_candidates, nms_windows
+from utils.sentences import apply_to_clip
 from scripts.pipeline.clean_transcript import clean_text
 from scripts.pipeline.visual_energy import (
     scan_video_window,
@@ -44,8 +46,11 @@ from scripts.pipeline.visual_energy import (
 )
 from scripts.ai.clip_intelligence import score_chunk
 from scripts.ai.clip_ranker import ranking_score, remove_time_overlap
+from utils.show_detect import detect_show, laughter_in_span
 
 OUTPUT = PROJECT_ROOT / "output"
+STOP_FLAG = OUTPUT / "job_stop.json"
+PROGRESS_FILE = OUTPUT / "scan_progress.json"
 
 
 def video_duration_seconds():
@@ -75,6 +80,28 @@ def source_video():
     return fallback if fallback.exists() else None
 
 
+def stop_request():
+    """Cooperative cancel written by POST /jobs/{id}/stop."""
+    if not STOP_FLAG.exists():
+        return None
+    try:
+        data = json.loads(STOP_FLAG.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "finish_current"
+    return data.get("mode") or "finish_current"
+
+
+def write_progress(**kwargs):
+    payload = {"updated_at": time.time()}
+    if PROGRESS_FILE.exists():
+        try:
+            payload.update(json.loads(PROGRESS_FILE.read_text(encoding="utf-8")) or {})
+        except (OSError, ValueError):
+            pass
+    payload.update(kwargs)
+    write_json(PROGRESS_FILE, payload)
+
+
 def clips_needed():
     plan = load_plan(required=False)
     if plan_is_usable(plan):
@@ -92,11 +119,26 @@ def collect_segments(wav, window_start, duration):
         text = clean_text((seg.get("text") or "").strip())
         if not text:
             continue
-        new_segments.append({
+        words = []
+        for word in seg.get("words") or []:
+            token = (word.get("word") or "").strip()
+            if not token:
+                continue
+            words.append({
+                "word": token,
+                "start": round(window_start + float(word.get("start") or 0), 2),
+                "end": round(window_start + float(word.get("end") or 0), 2),
+            })
+        row = {
             "start": round(window_start + float(seg.get("start") or 0), 2),
             "end": round(window_start + float(seg.get("end") or duration), 2),
             "text": text,
-        })
+        }
+        # Word timings drive caption cues and jump-cut gaps when Whisper
+        # supplies them; the Gemini audio fallback does not.
+        if words:
+            row["words"] = words
+        new_segments.append(row)
     return new_segments
 
 
@@ -118,25 +160,22 @@ def extract_window(video: Path, start: float, duration: float, dest: Path):
     )
 
 
-def transcribe_slice(video, start, duration, wav):
-    extract_window(video, start, duration, wav)
-    rms = wav_rms_series(wav, start, hop=0.5) if VIDEO_ANALYSIS_ENABLED else []
-    return collect_segments(wav, start, duration), rms
-
-
 def transcribe_window(video, start, duration, wav):
-    """Whisper/Gemini never sees more than WHISPER_SLICE_SECONDS of audio."""
-    segments = []
-    rms = []
-    offset = 0.0
-    while offset < duration - 0.05:
-        slice_dur = min(WHISPER_SLICE_SECONDS, duration - offset)
-        print(f"  transcribe {start + offset:.0f}s -> {start + offset + slice_dur:.0f}s")
-        segs, slice_rms = transcribe_slice(video, start + offset, slice_dur, wav)
-        segments.extend(segs)
-        rms.extend(slice_rms)
-        gc.collect()
-        offset += slice_dur
+    """One extract + one Whisper call for the whole window.
+
+    The worker process keeps the model loaded, so repeating 15-second
+    slices was wasting minutes on model startup rather than speech.
+    """
+    print(f"  transcribe {start:.0f}s -> {start + duration:.0f}s")
+    write_progress(
+        stage="transcript",
+        label=f"Scoring chunk {int(start)}s–{int(start + duration)}s",
+        scanned_seconds=round(start, 1),
+        max_scan_seconds=HARD_MAX_SCAN_SECONDS,
+    )
+    extract_window(video, start, duration, wav)
+    rms = wav_rms_series(wav, start, hop=0.4)
+    segments = collect_segments(wav, start, duration)
     return segments, rms
 
 
@@ -197,15 +236,14 @@ def main():
 
     needed, largest = clips_needed()
     print(
-        f"Scan-until-good: need {needed} distinct clips >= {MIN_OVERALL_SCORE} "
-        f"(stop after {MAX_SCAN_SECONDS}s if {largest}+ highlights exist). "
-        f"Video {duration:.0f}s, window {SCAN_WINDOW_SECONDS}s, "
-        f"mode={'audio+visual' if VIDEO_ANALYSIS_ENABLED else 'audio'}."
+        f"Chunk scan: take {int(SCAN_WINDOW_SECONDS)}s, score it, repeat until "
+        f"{needed} clips. Weak opening? keep walking (hard cap {int(HARD_MAX_SCAN_SECONDS / 60)} min)."
     )
 
     engine = "whisper-isolated"
     all_segments = []
     all_analysis = []
+    all_rms = []
     chunk_id = 1
     scanned = 0.0
     stopped_early = False
@@ -213,9 +251,22 @@ def main():
 
     start = 0.0
     while start < duration - 2:
+        if stop_request():
+            stopped_early = True
+            print("  stop requested — packaging whatever highlights we already have.")
+            break
+        needed, largest = clips_needed()
         window = min(SCAN_WINDOW_SECONDS, duration - start)
         wav = OUTPUT / "scan_window.wav"
         print(f"\nScanning {start:.0f}s -> {start + window:.0f}s ...")
+        write_progress(
+            stage="transcript",
+            label=f"Chunk {int(start / SCAN_WINDOW_SECONDS) + 1}: scoring {int(start)}s–{int(start + window)}s, then skip the rest if it is enough",
+            scanned_seconds=round(start, 1),
+        max_scan_seconds=HARD_MAX_SCAN_SECONDS,
+            source_seconds=round(duration, 1),
+            needed=needed,
+        )
         w0 = time.time()
         if VIDEO_ANALYSIS_ENABLED:
             with ThreadPoolExecutor(max_workers=2) as pool:
@@ -229,19 +280,36 @@ def main():
         log_whisper_time(time.time() - w0)
         gc.collect()
 
+        if all_segments and new_segments:
+            cutoff = float(all_segments[-1].get("end") or 0) - 0.25
+            new_segments = [s for s in new_segments if float(s.get("start") or 0) >= cutoff]
         all_segments.extend(new_segments)
+        all_rms.extend(rms_series)
         scanned = start + window
 
         energy_map = merge_audio(visual_samples, rms_series)
-        raw = build_candidates(new_segments)
+        raw = build_candidates(all_segments)
+        raw = [
+            cand for cand in raw
+            if float(cand.get("start") or 0) >= start - 0.5
+        ]
         for cand in raw:
             energy = score_span(energy_map, cand["start"], cand["end"])
+            laughed, tail = laughter_in_span(
+                rms_series, cand["start"], cand["end"], new_segments,
+            )
+            signals = dict(energy.get("visual_signals") or {})
+            signals["laughter"] = laughed
+            signals["reaction_seconds"] = tail
             cand["visual_score"] = energy["visual_score"]
             cand["audio_energy"] = energy["audio_energy"]
-            cand["visual_signals"] = energy["visual_signals"]
-            cand["highlight_reason"] = energy["highlight_reason"]
+            cand["visual_signals"] = signals
+            cand["highlight_reason"] = (
+                "audience reaction" if laughed else energy["highlight_reason"]
+            )
+            boost = 2.8 if laughed else 0.0
             cand["heuristic_score"] = round(
-                float(cand.get("heuristic_score") or 0) + heuristic_boost(energy),
+                float(cand.get("heuristic_score") or 0) + heuristic_boost(energy) + boost,
                 2,
             )
         window_chunks = nms_windows(raw)
@@ -254,6 +322,7 @@ def main():
         to_score = []
         for cand in window_chunks:
             cand = dict(cand)
+            apply_to_clip(cand, all_segments)
             cand["chunk_id"] = chunk_id
             chunk_id += 1
             to_score.append(cand)
@@ -266,21 +335,39 @@ def main():
             f"{len(usable)} usable (>= {USABLE_SCORE_FLOOR}) "
             f"(scanned {scanned:.0f}s / {duration:.0f}s)"
         )
-        if len(strong) >= needed:
+        write_progress(
+            stage="transcript",
+            label=(
+                f"Chunk scored — {len(usable)} usable of {needed} needed "
+                f"after {int(scanned)}s (cap {int(MAX_SCAN_SECONDS)}s)"
+            ),
+            scanned_seconds=round(scanned, 1),
+        max_scan_seconds=HARD_MAX_SCAN_SECONDS,
+            source_seconds=round(duration, 1),
+            strong=len(strong),
+            usable=len(usable),
+            needed=needed,
+        )
+        if len(usable) >= needed or len(strong) >= needed:
             stopped_early = True
-            print("  enough distinct highlights — rest of video skipped.")
+            print("  enough scored chunks — rest of video skipped.")
             break
-        if scanned >= MAX_SCAN_SECONDS and len(strong) >= max(1, largest):
+        if scanned >= MAX_SCAN_SECONDS:
             stopped_early = True
             print(
-                f"  first {MAX_SCAN_SECONDS}s already has {len(strong)} strong clip(s) "
-                f"(plan peak {largest}) — stopping like an editor who found the package."
+                f"  {int(MAX_SCAN_SECONDS / 60)} min cap "
+                f"({len(usable)} usable) — ranking the best of what we have."
             )
             break
+        if len(usable) == 0:
+            print("  opening is weak — next chunk, not the full talk.")
 
-        start += window
+        start += max(8.0, window - SCAN_OVERLAP_SECONDS)
 
     elapsed = time.time() - t0
+    show = detect_show(all_analysis)
+    print(f"Show type: {show['id']} — {show.get('reason') or show['label']}")
+    write_json(OUTPUT / "rms_series.json", {"samples": all_rms})
     transcript = " ".join(s["text"] for s in all_segments)
     payload = {
         "language": "en",
@@ -298,6 +385,7 @@ def main():
             "usable_floor": USABLE_SCORE_FLOOR,
             "needed": needed,
             "visual_analysis": VIDEO_ANALYSIS_ENABLED,
+            "show_type": show.get("id"),
         },
     }
     write_json(OUTPUT / "transcript.json", payload)
@@ -319,6 +407,7 @@ def main():
         "scan_complete": True,
         "stopped_early": stopped_early,
         "analysis_mode": "audio_visual" if VIDEO_ANALYSIS_ENABLED else "audio_first",
+        "show_type": show.get("id"),
     })
 
     print(
@@ -326,6 +415,7 @@ def main():
         f"Covered {scanned:.0f}s of {duration:.0f}s. "
         f"Early stop={stopped_early}."
     )
+    close_worker()
 
 
 if __name__ == "__main__":

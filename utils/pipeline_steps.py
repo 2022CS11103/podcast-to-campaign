@@ -29,6 +29,7 @@ STEP_TO_INDEX = {
 
 
 def describe_step(step: str, status: str):
+    stopped = status == "stopped"
     if status == "queued" or not step:
         active = 0
     elif status == "completed" or step == "done":
@@ -38,6 +39,8 @@ def describe_step(step: str, status: str):
 
     if status == "completed":
         percent = 100
+    elif stopped:
+        percent = int(round(max(active, 1) / 9 * 100))
     elif active <= 0:
         percent = 0
     else:
@@ -48,6 +51,9 @@ def describe_step(step: str, status: str):
         idx = item["index"]
         if status == "failed" and idx == max(active, 1):
             state = "error"
+        elif stopped:
+            # A stopped run keeps everything it finished and skips the rest.
+            state = "done" if idx <= active else "skipped"
         elif status == "completed" or idx < active:
             state = "done"
         elif idx == active:

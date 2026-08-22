@@ -14,7 +14,7 @@ export const PROCESSING_STEPS = [
   {
     id: "transcript",
     label: "Watching and listening",
-    description: "Reading the words, scene changes, motion, and loud beats together.",
+    description: "Scoring short opening chunks, then skipping the rest of the talk.",
   },
   {
     id: "highlight",
@@ -53,6 +53,23 @@ export const PROCESSING_STEPS = [
   },
 ];
 
+export const SHOW_TYPES = [
+  {
+    id: "auto",
+    label: "Auto-detect",
+  },
+  {
+    id: "comedy",
+    label: "Comedy / panel show",
+    detail: "Punchlines, speaker energy, and 1–2s of audience laughter after the joke.",
+  },
+  {
+    id: "interview",
+    label: "Insight interview",
+    detail: "Bold statements first, then context. Keywords like money, crores, mistake, secret.",
+  },
+];
+
 export const DEFAULT_CAMPAIGN = {
   sourceType: "url",
   source: "",
@@ -61,6 +78,7 @@ export const DEFAULT_CAMPAIGN = {
   goal: "Brand awareness",
   audience: "Startup founders",
   tone: "Professional",
+  showType: "auto",
   durationDays: 30,
   startDate: new Date().toISOString().slice(0, 10),
 };
@@ -101,4 +119,12 @@ export const PLATFORM_META = {
   instagram: { name: "Instagram", detail: "Reels + carousels", tone: "pink" },
   linkedin: { name: "LinkedIn", detail: "Authority posts", tone: "blue" },
   twitter: { name: "Twitter / X", detail: "Threads + replies", tone: "slate" },
+};
+
+export const CALENDAR_PLATFORMS = {
+  youtube_shorts: { short: "YT", label: "YouTube", tone: "red" },
+  instagram_reels: { short: "IG", label: "Instagram", tone: "pink" },
+  tiktok: { short: "TT", label: "TikTok", tone: "mint" },
+  linkedin: { short: "in", label: "LinkedIn", tone: "blue" },
+  twitter: { short: "X", label: "Twitter / X", tone: "slate" },
 };
