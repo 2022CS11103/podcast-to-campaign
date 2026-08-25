@@ -72,7 +72,7 @@ FRONTEND_URL=http://127.0.0.1:8000/app
 
 You can rotate keys with `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, and so on.
 
-Optional — YouTube publish:
+Optional - YouTube publish:
 
 ```
 GOOGLE_CLIENT_ID=
@@ -80,7 +80,7 @@ GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=http://127.0.0.1:8000/youtube/callback
 ```
 
-Optional — Instagram / LinkedIn / X connect, plus `OAUTH_TOKEN_ENCRYPTION_KEY`.
+Optional - Instagram / LinkedIn / X connect, plus `OAUTH_TOKEN_ENCRYPTION_KEY`.
 
 Studio login works with email/password with no extra setup. Google sign-in needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the frontend env, then a frontend rebuild.
 
@@ -111,7 +111,7 @@ export PYTHONIOENCODING=utf-8
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-Leave this terminal running. Do **not** use `--reload` for this pipeline — restart the process after Python changes.
+Leave this terminal running. Do **not** use `--reload` for this pipeline - restart the process after Python changes.
 
 ### 6. Open the app
 
@@ -120,7 +120,7 @@ In a browser:
 **http://127.0.0.1:8000/app/**
 
 1. Create an account (or sign in).  
-2. You land on **Accounts** — connect channels or skip.  
+2. You land on **Accounts** - connect channels or skip.  
 3. Go to **Content**, paste a YouTube/podcast URL or upload a video.  
 4. Set how many posts per platform, then generate.  
 5. Stay on the processing page until the campaign is ready, then review Library and Calendar.
