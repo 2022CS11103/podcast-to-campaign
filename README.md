@@ -2,7 +2,7 @@
 
 **One video. A month of content.**
 
-creatorOS is an AI content operating system. Upload one podcast, interview, or long-form video and it plans, edits, and schedules a multi-platform campaign — Shorts, Reels, LinkedIn posts, and X — with a 30-day calendar you control.
+creatorOS is an AI content operating system. Upload one podcast, interview, or long-form video and it plans, edits, and schedules a multi-platform campaign - Shorts, Reels, LinkedIn posts, and X - with a 30-day calendar you control.
 
 Create once. Repurpose everywhere.
 
@@ -72,12 +72,12 @@ Studio login works locally with email/password. For Google sign-in and cloud acc
 
 ## Using the studio
 
-1. Sign in — you land on **Accounts** with a 3-step guide  
+1. Sign in - you land on **Accounts** with a 3-step guide  
 2. Connect channels (optional) or skip  
-3. **Content** — paste a URL or upload a file  
+3. **Content** - paste a URL or upload a file  
 4. Shape counts per platform, then generate  
 5. Watch **creatorOS is thinking**; stop one platform or the whole run if you want fewer posts  
-6. Review the library and **Calendar** — pause a channel or skip a day anytime  
+6. Review the library and **Calendar** - pause a channel or skip a day anytime  
 
 ## Repo map
 
