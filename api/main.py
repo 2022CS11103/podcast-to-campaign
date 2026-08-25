@@ -19,6 +19,7 @@ from api.schemas import (
     YouTubeUploadRequest,
     StopJobRequest,
     ScopeJobRequest,
+    ScheduleControlRequest,
 )
 from api.job_manager import job_manager
 from api.pipeline_runner import start_worker, enqueue_job
@@ -311,6 +312,7 @@ def campaign_board():
         ),
         "items": items,
         "calendar": calendar_from_bank({**bank, "items": items}) if items else None,
+        "holds": dict(bank.get("holds") or {}),
     }
 
 
@@ -538,7 +540,8 @@ def get_status(job_id: str):
     if job["status"] in ("running", "stopping") and progress_file.exists():
         try:
             with open(progress_file, "r", encoding="utf-8") as f:
-                scan_progress = json.load(f)
+                json.load(f)
+            scan_progress = {"label": ui["step_label"]}
         except (OSError, ValueError):
             scan_progress = None
 
@@ -611,7 +614,7 @@ def reduce_job_scope(job_id: str, req: ScopeJobRequest):
         "job_id": job_id,
         "status": job.get("status"),
         "plan": load_plan(required=False),
-        "message": "Later steps will only produce the counts you kept.",
+        "message": "That platform is stopped. Later steps will skip it.",
     }
 
 
@@ -623,7 +626,11 @@ def next_scheduled_post():
     with open(CONTENT_BANK, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    pending = [item for item in data["items"] if item["status"] in ("pending", "scheduled_repost")]
+    pending = [
+        item for item in data["items"]
+        if item.get("status") in ("pending", "scheduled_repost")
+        and not (data.get("holds") or {}).get(item.get("assigned_platform"))
+    ]
     if not pending:
         return {"message": "No pending items to post"}
 
@@ -660,10 +667,99 @@ def get_campaign_calendar(year: int | None = None, month: int | None = None):
     calendar_file = PROJECT_ROOT / "output" / "campaign_calendar.md"
     if calendar_file.exists():
         markdown = calendar_file.read_text(encoding="utf-8")
+    calendar = calendar_from_bank(bank, year=year, month=month)
     return {
         "calendar_markdown": markdown,
-        "calendar": calendar_from_bank(bank, year=year, month=month),
+        "calendar": calendar,
+        "holds": dict(bank.get("holds") or {}),
     }
+
+
+SCHEDULE_KEYS = {
+    "instagram": "instagram_reels",
+    "instagram_reels": "instagram_reels",
+    "youtube": "youtube_shorts",
+    "youtube_shorts": "youtube_shorts",
+    "linkedin": "linkedin",
+    "twitter": "twitter",
+    "x": "twitter",
+    "tiktok": "tiktok",
+}
+
+
+def _read_bank():
+    if not CONTENT_BANK.exists():
+        raise HTTPException(status_code=404, detail="Generate a campaign before changing the schedule.")
+    with open(CONTENT_BANK, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _write_bank(bank):
+    with open(CONTENT_BANK, "w", encoding="utf-8") as f:
+        json.dump(bank, f, indent=2, ensure_ascii=False)
+
+
+def _schedule_payload(bank):
+    return {
+        "holds": dict(bank.get("holds") or {}),
+        "calendar": calendar_from_bank(bank),
+        "items": bank.get("items") or [],
+    }
+
+
+@app.post("/schedule/hold")
+def hold_platform(req: ScheduleControlRequest):
+    key = SCHEDULE_KEYS.get((req.platform or "").strip().lower())
+    if not key:
+        raise HTTPException(status_code=400, detail="Unknown platform.")
+    bank = _read_bank()
+    holds = dict(bank.get("holds") or {})
+    holds[key] = True
+    bank["holds"] = holds
+    paused = 0
+    for item in bank.get("items") or []:
+        if item.get("assigned_platform") == key and item.get("status") in ("pending", "scheduled_repost"):
+            item["status"] = "paused"
+            item["paused_reason"] = "platform_hold"
+            paused += 1
+    _write_bank(bank)
+    return {"status": "held", "platform": key, "paused": paused, **_schedule_payload(bank)}
+
+
+@app.post("/schedule/resume")
+def resume_platform(req: ScheduleControlRequest):
+    key = SCHEDULE_KEYS.get((req.platform or "").strip().lower())
+    if not key:
+        raise HTTPException(status_code=400, detail="Unknown platform.")
+    bank = _read_bank()
+    holds = dict(bank.get("holds") or {})
+    holds[key] = False
+    bank["holds"] = holds
+    restored = 0
+    for item in bank.get("items") or []:
+        if item.get("assigned_platform") == key and item.get("status") == "paused":
+            item["status"] = "pending"
+            item.pop("paused_reason", None)
+            restored += 1
+    _write_bank(bank)
+    return {"status": "live", "platform": key, "restored": restored, **_schedule_payload(bank)}
+
+
+@app.post("/schedule/skip/{item_id}")
+def skip_scheduled_item(item_id: str):
+    bank = _read_bank()
+    found = None
+    for item in bank.get("items") or []:
+        if item.get("id") == item_id:
+            if item.get("status") == "posted":
+                raise HTTPException(status_code=400, detail="This post already went out.")
+            item["status"] = "skipped"
+            found = item
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Scheduled post not found.")
+    _write_bank(bank)
+    return {"status": "skipped", "item_id": item_id, **_schedule_payload(bank)}
 
 
 @app.get("/download-campaign/{job_id}")

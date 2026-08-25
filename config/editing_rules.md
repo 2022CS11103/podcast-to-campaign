@@ -97,9 +97,25 @@ Tighten a window by at most 20% to honour rules 2 and 6, and never below 12s.
 
 ## 8. Picture and sound
 
-- Vertical 1080x1920, subject framed in the middle third.
-- Dialogue is loud, level, and never clipped.
+- Vertical 1080x1920. Crop follows the speaker; do not center-crop a walking subject.
+- Dialogue is loud, level, and never clipped. Strip um / uh. Denoise, then compress.
 - Grade is a light lift in contrast and saturation, not a filter.
+
+## 8b. Narrative stitch (Producer)
+
+A Short is a story, not a 30-second extract.
+
+- Shape every cut as hook → context → statement → payoff.
+- If the strongest line is later in the window, play it first, then rewind.
+- Drop rambling middle sentences. Stitch the keepers even when they are not contiguous.
+- Jump-cut filler words (`um`, `uh`) and dead air. Never cut inside a word.
+- Micro-fade (about 70ms) between stitched beats so the join is a cut, not a glitch.
+
+## 8c. Motion graphics / B-roll
+
+- On the claim or payoff, flash a kinetic title card (the emphasized words).
+- At most two cards. Never cover the first 1.5s — the face is the hook.
+- Cards are 0.85–1.2s. Talking-head audio keeps playing under a cutaway when possible.
 
 ## 9. Quality gate
 

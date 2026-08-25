@@ -204,6 +204,12 @@ def safer_plan(plan: dict, report: dict) -> dict:
         if revised.get("drop_silences", True):
             revised["drop_silences"] = False
             changed.append("kept the full take (no silence removal)")
+        if revised.get("drop_fillers", True):
+            revised["drop_fillers"] = False
+            changed.append("kept filler words")
+        if revised.get("shot_order"):
+            revised["shot_order"] = []
+            changed.append("disabled narrative stitch")
         if revised.get("trim"):
             revised.pop("trim")
             changed.append("dropped the trim")

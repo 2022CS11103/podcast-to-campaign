@@ -1,18 +1,20 @@
 """
-Execution layer: Mosaic-style Shorts/Reels, not a raw trim.
+Execution layer: Opus-style Shorts/Reels, not a raw trim.
 
-  jump cuts (drop dead air)
-  9:16 reframe
+  narrative stitch (hook → context → payoff)
+  filler / dead-air jump cuts
+  speaker-follow 9:16 reframe
   punch-in zooms on hook + payoff
-  hook title for the first beat
-  keyword-pop captions in the TikTok safe area
-  louder, tighter dialogue
+  kinetic B-roll cards
+  karaoke captions
+  cleaner dialogue
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,13 +28,18 @@ sys.path.append(str(PROJECT_ROOT))
 
 from config.editing_style import (
     CAPTION,
+    FILLER_DROP,
     MIN_SHOT_SECONDS,
+    SOFT_FILLER,
+    TRANSITION,
     normalize_pace,
     profile_for,
 )
 from scripts.video.edit_quality import evaluate, safer_plan, summarize
 from scripts.video.subtitle_generator import ass_time, cue_lines, split_cues
 from scripts.video.render_shorts import ffmpeg_subtitles_path
+from scripts.video.reframe import crop_origin, probe_size, speaker_x
+from scripts.video.broll import render_card
 from utils.sentences import flatten_words, is_cut_point, snap_window
 from config.show_style import load_resolved
 from utils.show_detect import caption_words, gap_is_reaction
@@ -114,7 +121,22 @@ def limit_ranges(ranges, max_ranges):
     return [tuple(r) for r in rows]
 
 
-def speech_ranges(clip, segments, min_gap, breath=0.0, max_ranges=None, keep_tail=False, rms_series=None):
+def _filler_key(token: str) -> str:
+    return re.sub(r"[^a-z']", "", (token or "").lower())
+
+
+def should_drop_filler(token, prev_gap, next_gap, enabled=True) -> bool:
+    if not enabled:
+        return False
+    key = _filler_key(token)
+    if key in FILLER_DROP:
+        return True
+    if key in SOFT_FILLER and (prev_gap >= 0.16 or next_gap >= 0.16):
+        return True
+    return False
+
+
+def speech_ranges(clip, segments, min_gap, breath=0.0, max_ranges=None, keep_tail=False, rms_series=None, drop_fillers=True):
     start = float(clip["start"])
     end = float(clip["end"])
     words = [
@@ -139,12 +161,25 @@ def speech_ranges(clip, segments, min_gap, breath=0.0, max_ranges=None, keep_tai
             else:
                 merged.append([a, b])
     else:
+        kept = []
+        dropped_since = False
+        for i, row in enumerate(words):
+            prev_gap = 0.0 if i == 0 else row["start"] - words[i - 1]["end"]
+            next_gap = 0.0 if i == len(words) - 1 else words[i + 1]["start"] - row["end"]
+            if should_drop_filler(row["word"], prev_gap, next_gap, drop_fillers):
+                dropped_since = True
+                continue
+            kept.append((row, dropped_since))
+            dropped_since = False
+        words = [row for row, _ in kept] or words
+        flags = [flag for _, flag in kept] or [False] * len(words)
         merged = [[words[0]["start"], words[0]["end"]]]
         prev_token = words[0]["word"]
-        for row in words[1:]:
+        for i, row in enumerate(words[1:], start=1):
             gap = row["start"] - merged[-1][1]
             laugh = gap_is_reaction(rms_series, merged[-1][1], row["start"])
-            if laugh or not is_cut_point(prev_token, row["word"], gap, min_gap):
+            cut = flags[i] or is_cut_point(prev_token, row["word"], gap, min_gap)
+            if laugh or not cut:
                 merged[-1][1] = max(merged[-1][1], row["end"])
             else:
                 merged.append([row["start"], row["end"]])
@@ -321,9 +356,9 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,54,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,0.2,0,1,7,0,2,70,70,250,1
-Style: Pop,Arial Black,72,&H0000E5FF,&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,0.0,0,1,8,0,2,55,55,250,1
-Style: Hook,Arial Black,48,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,-1,0,0,0,100,100,0.2,0,1,6,0,8,80,80,120,1
+Style: Default,Arial Black,64,&H00FFFFFF,&H000000FF,&H00000000,&HA0000000,-1,0,0,0,100,100,0.4,0,1,8,0,2,60,60,280,1
+Style: Pop,Arial Black,84,&H0000E5FF,&H000000FF,&H00001020,&HA0000000,-1,0,0,0,100,100,0.0,0,1,10,0,2,40,40,280,1
+Style: Hook,Arial Black,52,&H00FFFFFF,&H000000FF,&H00000000,&HA0000000,-1,0,0,0,100,100,0.3,0,1,7,0,8,70,70,140,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -370,7 +405,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         t0 = max(t0, cursor)
         t1 = max(t1, t0 + CAPTION["min_cue_seconds"])
         t1 = min(t1, t0 + CAPTION["max_cue_seconds"])
-        if t1 <= t0 + 0.28:
+        if t1 <= t0 + 0.16:
             continue
         packed.append((t0, t1, words))
         cursor = t1
@@ -379,7 +414,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         hit = any(w.lower().strip(".,!?'\"") in keys for w in words)
         style = "Pop" if hit else "Default"
         text = _ass_escape(r"\N".join(cue_lines(words)))
-        pop = r"{\fad(50,50)\bord5\t(0,120,\fscx108\fscy108)}" if hit else r"{\fad(50,50)\bord5}"
+        if hit:
+            pop = r"{\fad(40,50)\bord8\shad3\t(0,90,\fscx132\fscy132)\t(90,180,\fscx112\fscy112)}"
+        else:
+            pop = r"{\fad(40,50)\bord7\t(0,80,\fscx108\fscy108)}"
         lines.append(
             f"Dialogue: 0,{ass_time(t0)},{ass_time(t1)},{style},,0,0,0,,{pop}{text}\n"
         )
@@ -401,25 +439,35 @@ def _ffmpeg(command, cwd=None):
         raise RuntimeError(err[-1500:] or f"ffmpeg exit {result.returncode}")
 
 
-def render_piece(source: Path, piece, dest: Path):
+def render_piece(source: Path, piece, dest: Path, src_size=None):
     dur = piece["src_end"] - piece["src_start"]
     zoom = max(1.0, float(piece.get("zoom") or 1.0))
-    zw = int(round(1080 * zoom))
-    zh = int(round(1920 * zoom))
+    src_w, src_h = src_size or (1920, 1080)
+    x_frac = float(piece.get("follow_x") if piece.get("follow_x") is not None else 0.5)
+    cx, cy, zw, zh = crop_origin(x_frac, src_w, src_h, zoom)
+    fade = min(TRANSITION["fade"], max(0.0, dur / 6.0))
     grade = (
         "hqdn3d=1.8:1.2:4:4,"
         "unsharp=5:5:0.8:5:5:0.0,"
-        "eq=contrast=1.10:saturation=1.12:brightness=0.02,"
-        "vignette=PI/6"
+        "eq=contrast=1.12:saturation=1.16:brightness=0.02,"
+        "vignette=PI/7"
     )
+    fades = ""
+    if fade >= 0.04 and dur > 0.35:
+        fades = f",fade=t=in:st=0:d={fade:.3f},fade=t=out:st={max(0.0, dur - fade):.3f}:d={fade:.3f}"
     vf = (
         "setpts=PTS-STARTPTS,"
         f"scale={zw}:{zh}:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,"
-        f"{grade},"
+        f"crop=1080:1920:{cx}:{cy},"
+        f"{grade}{fades},"
         "setsar=1"
     )
-    af = "highpass=f=70,volume=8dB,alimiter=limit=0.95,asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0"
+    af = (
+        "highpass=f=80,afftdn=nr=8:nf=-25,"
+        "acompressor=threshold=-18dB:ratio=3:attack=8:release=80,"
+        "volume=7dB,alimiter=limit=0.95,asetpts=PTS-STARTPTS,"
+        "aresample=async=1:first_pts=0"
+    )
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-ss", f"{piece['src_start']:.3f}",
@@ -447,7 +495,7 @@ def render_piece(source: Path, piece, dest: Path):
         cmd[cmd.index("-vf") + 1] = (
             "setpts=PTS-STARTPTS,"
             f"scale={zw}:{zh}:force_original_aspect_ratio=increase,"
-            "crop=1080:1920,"
+            f"crop=1080:1920:{cx}:{cy},"
             "unsharp=5:5:0.8:5:5:0.0,eq=contrast=1.10:saturation=1.12,setsar=1"
         )
         cmd[cmd.index("-af") + 1] = "asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0,volume=7dB"
@@ -494,6 +542,51 @@ def concat_pieces(paths, dest: Path):
         str(dest),
     ])
     _ffmpeg(cmd)
+
+
+def overlay_broll(base: Path, cards, pieces, dest: Path, scratch: Path):
+    """Punch kinetic claim cards over the talking head at remapped times."""
+    if not cards:
+        shutil.copy2(base, dest)
+        return dest
+    inputs = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(base)]
+    filters = []
+    last = "[0:v]"
+    used = 0
+    for i, card in enumerate(cards, start=1):
+        t0 = remap_time(float(card["at_src"]), pieces)
+        if t0 is None:
+            continue
+        t1 = t0 + float(card.get("duration") or 1.0)
+        part = scratch / f"broll_{i}.mp4"
+        try:
+            render_card(card.get("title") or "WATCH", card.get("subtitle") or "", part, card.get("duration") or 1.0)
+        except Exception as exc:
+            _say(f"    b-roll card skipped ({exc})")
+            continue
+        inputs.extend(["-i", str(part)])
+        out = f"[ov{used}]"
+        idx = used + 1
+        filters.append(
+            f"[{idx}:v]setpts=PTS+{t0:.3f}/TB[c{used}];"
+            f"{last}[c{used}]overlay=(W-w)/2:(H-h)/2:enable='between(t,{t0:.2f},{t1:.2f})'{out}"
+        )
+        last = out
+        used += 1
+    if not filters:
+        shutil.copy2(base, dest)
+        return dest
+    cmd = inputs + [
+        "-filter_complex", ";".join(filters),
+        "-map", last, "-map", "0:a:0?",
+        "-preset", "ultrafast", "-crf", "25",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+        "-shortest", "-movflags", "+faststart",
+        str(dest),
+    ]
+    _ffmpeg(cmd)
+    return dest
 
 
 def burn_captions(video: Path, ass: Path, dest: Path):
@@ -568,6 +661,7 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
                 breath=profile["breath"],
                 keep_tail=False,
                 rms_series=rms_series,
+                drop_fillers=bool(plan.get("drop_fillers", True)),
             )
             ranges.extend(part)
         ranges = ranges or [(start, end)]
@@ -580,11 +674,20 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
             max_ranges=profile["max_shots"],
             keep_tail=keep_tail,
             rms_series=rms_series,
+            drop_fillers=bool(plan.get("drop_fillers", True)),
         )
     else:
         ranges = [(start, end)]
     punches = plan.get("punch_ins") or default_plan(clip)["punch_ins"]
     pieces = apply_punches(ranges, punches, max_pieces=profile["max_shots"] + 2)
+    src_size = probe_size(Path(source))
+    for piece in pieces:
+        try:
+            piece["follow_x"] = speaker_x(
+                Path(source), piece["src_start"], piece["src_end"], samples=3
+            )
+        except Exception:
+            piece["follow_x"] = 0.5
     scratch = scratch_root / f"short_{index}"
     if scratch.exists():
         shutil.rmtree(scratch)
@@ -595,9 +698,9 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
         part = scratch / f"p{i:02d}.mp4"
         _say(
             f"    shot {i}/{len(pieces)}  {piece['src_start']:.1f}-{piece['src_end']:.1f}s  "
-            f"zoom {piece['zoom']:.2f}"
+            f"zoom {piece['zoom']:.2f}  follow {piece.get('follow_x', 0.5):.2f}"
         )
-        render_piece(source, piece, part)
+        render_piece(source, piece, part, src_size=src_size)
         part_paths.append(part)
 
     nosub = scratch / "nosub.mp4"
@@ -609,6 +712,13 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
         except RuntimeError:
             shutil.copy2(part_paths[0], nosub)
 
+    staged = scratch / "staged.mp4"
+    try:
+        overlay_broll(nosub, plan.get("broll") or [], pieces, staged, scratch)
+    except Exception as exc:
+        _say(f"    b-roll overlay skipped ({exc})")
+        shutil.copy2(nosub, staged)
+
     ass = PROJECT_ROOT / "output" / "subtitles" / f"short_{index}.ass"
     write_mosaic_ass(
         segments, start, end, pieces,
@@ -619,7 +729,7 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
     )
     final = output_dir / f"short_{index}.mp4"
     try:
-        burn_captions(nosub, ass, final)
+        burn_captions(staged, ass, final)
     except RuntimeError:
         shutil.copy2(nosub, final)
     shutil.rmtree(scratch, ignore_errors=True)
@@ -729,7 +839,7 @@ def run_edits(source: Path):
     rms_doc = load_json(PROJECT_ROOT / "output" / "rms_series.json") or {}
     rms_series = rms_doc.get("samples") or []
     show = load_resolved()
-    _say(f"Mosaic editor: {len(clips)} cuts from {source.name}  [{show.get('id')}]")
+    _say(f"Producer editor: {len(clips)} cuts from {source.name}  [{show.get('id')}]")
     if not clips:
         raise RuntimeError("No clips to edit (clips.json and edit_plans.json were empty).")
 

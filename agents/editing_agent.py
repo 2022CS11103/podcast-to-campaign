@@ -13,7 +13,7 @@ class EditingAgent(BaseAgent):
 
     def run(self):
 
-        self.log("Starting Mosaic-style edit agent...")
+        self.log("Starting producer edit (stitch, reframe, captions, B-roll)...")
 
         video_path = self.memory.get("video_path")
         if video_path is None:

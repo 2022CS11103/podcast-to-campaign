@@ -58,13 +58,23 @@ PUNCH_TAIL_GUARD = 0.40
 
 # Caption shape.
 CAPTION = {
-    "max_words_per_cue": 4,
+    "max_words_per_cue": 3,
     "max_lines": 2,
-    "min_cue_seconds": 0.45,
-    "max_cue_seconds": 2.1,
-    "hook_hold_seconds": 1.45,
+    "min_cue_seconds": 0.28,
+    "max_cue_seconds": 1.65,
+    "hook_hold_seconds": 1.25,
     "emphasize_max": 4,
 }
+
+# Filler tokens the executor may jump-cut out of the dialogue.
+FILLER_DROP = {"uh", "um", "umm", "uhh", "erm", "ah", "huh", "hmm"}
+SOFT_FILLER = {"like", "basically", "literally", "actually"}
+
+# Micro fades between stitched beats (seconds).
+TRANSITION = {"fade": 0.07}
+
+# Kinetic B-roll cards on the claim / payoff.
+BROLL = {"max_cards": 2, "min_duration": 0.85, "max_duration": 1.2}
 
 # How far the director may tighten a ranked window to honour the rule book.
 TRIM = {

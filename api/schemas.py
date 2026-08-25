@@ -103,6 +103,13 @@ class ScopeJobRequest(BaseModel):
     plan: Dict[str, Any]
 
 
+class ScheduleControlRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    platform: Optional[str] = None
+    item_id: Optional[str] = None
+    hold: Optional[bool] = None
+
+
 class YouTubeUploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     item_id: Optional[str] = None

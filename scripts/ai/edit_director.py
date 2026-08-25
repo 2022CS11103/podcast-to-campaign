@@ -35,6 +35,7 @@ from utils.show_detect import hook_sentence
 from config.show_style import load_resolved
 from utils.gemini_clients import generate_content
 from utils.cost_tracker import log_gemini_call
+from scripts.ai.narrative_edit import pack_beats, suggest_broll
 
 DIRECTOR_PROMPT = """You are a short-form video editor (TikTok/Reels/Shorts), not a clip exporter.
 
@@ -57,12 +58,21 @@ Return ONLY JSON:
   "hook_line": "the exact sentence from the transcript that should open the cut",
   "trim": {{"start": 12.0, "end": 44.5}},
   "drop_silences": true,
+  "drop_fillers": true,
   "punch_ins": [
     {{"at_src": 12.4, "duration": 0.7, "zoom": 1.18, "why": "hook"}}
   ],
   "caption_mode": "keyword_pop",
   "emphasize": ["word1", "word2"],
   "payoff_at": 30.2,
+  "beats": [
+    {{"role": "hook", "start": 18.2, "end": 22.0}},
+    {{"role": "context", "start": 12.0, "end": 18.0}},
+    {{"role": "payoff", "start": 22.0, "end": 31.5}}
+  ],
+  "broll": [
+    {{"at_src": 24.0, "duration": 1.0, "title": "CHANGE EVERYTHING", "subtitle": ""}}
+  ],
   "retention_risk": "one sentence naming the likely drop-off point"
 }}
 
@@ -77,6 +87,9 @@ Hard constraints:
 - punch_ins: {punch_lo} to {punch_hi} entries for this pace, zoom between
   {zoom_lo} and {zoom_hi}, duration {dur_lo}-{dur_hi}s, at least {spacing}s apart.
 - emphasize: 1-{emph_max} punchy words that actually appear in the transcript.
+- beats: 2-4 complete sentences that form hook → context → payoff. Drop rambling
+  middle sentences. If the hook is later, list it first then rewind.
+- broll: 0-2 kinetic title cards on the claim, never in the first 1.5s.
 
 clip_start: {start}
 clip_end: {end}
@@ -164,6 +177,7 @@ def fallback_plan(clip, rows=None):
         "caption_mode": "keyword_pop",
         "emphasize": _hook_words(hook),
         "payoff_at": round(punchline_at, 2),
+        "drop_fillers": True,
         "retention_risk": "Opening line has to land in the first two seconds.",
     }
 
@@ -277,6 +291,60 @@ def _clamp_punches(plan, pace, window):
     return spaced
 
 
+def _beats_to_order(beats, window):
+    start, end = window
+    order = []
+    for beat in beats or []:
+        if not isinstance(beat, dict):
+            continue
+        try:
+            a = float(beat.get("start") if beat.get("start") is not None else beat.get("src_start"))
+            b = float(beat.get("end") if beat.get("end") is not None else beat.get("src_end"))
+        except (TypeError, ValueError):
+            continue
+        a = min(max(a, start - 12.0), end)
+        b = min(max(b, start), end + 12.0)
+        if b - a < 0.45:
+            continue
+        role = str(beat.get("role") or beat.get("why") or "beat")[:40]
+        order.append({
+            "role": role,
+            "src_start": round(a, 2),
+            "src_end": round(b, 2),
+            "why": role,
+        })
+    return order
+
+
+def _clamp_broll(plan, window, rows):
+    start, end = window
+    cards = []
+    for item in plan.get("broll") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            at = float(item.get("at_src"))
+            dur = float(item.get("duration") or 1.0)
+        except (TypeError, ValueError):
+            continue
+        if at < start + 1.5 or at >= end - 0.6:
+            continue
+        title = str(item.get("title") or "").strip()
+        if not title:
+            continue
+        cards.append({
+            "at_src": round(at, 2),
+            "duration": round(min(1.2, max(0.85, dur)), 2),
+            "title": title[:28],
+            "subtitle": str(item.get("subtitle") or "")[:42],
+        })
+        if len(cards) >= 2:
+            break
+    if not cards:
+        cards = suggest_broll(plan, rows)
+    return cards[:2]
+
+
 def _clamp_plan(plan, clip, rows, segments=None):
     pace = normalize_pace(plan.get("pace"), plan.get("goal"))
     trim = _clamp_trim(plan, clip, rows, segments)
@@ -301,8 +369,20 @@ def _clamp_plan(plan, clip, rows, segments=None):
         payoff = default_payoff
     payoff = round(payoff, 2)
     show = load_resolved()
-    shot_order = []
-    if show.get("hook_first"):
+    hook_line = str(plan.get("hook_line") or (rows[0]["text"] if rows else ""))[:180]
+    shot_order = _beats_to_order(plan.get("beats"), window)
+    if not shot_order and not show.get("keep_reactions"):
+        packed = pack_beats(
+            rows,
+            hook_line,
+            payoff_at=payoff,
+            hook_first=True,
+            min_keep=TRIM["min_seconds"],
+        )
+        if packed:
+            shot_order = packed
+            hook_line = str(plan.get("hook_line") or (rows[0]["text"] if rows else ""))[:180]
+    if not shot_order and show.get("hook_first"):
         hook_row = hook_sentence(rows)
         hs = float(hook_row["start"]) if hook_row else window[0]
         he = float(hook_row["end"]) if hook_row else window[0]
@@ -318,10 +398,6 @@ def _clamp_plan(plan, clip, rows, segments=None):
                     "why": "rest of the thought",
                 })
             hook_line = str(plan.get("hook_line") or hook_row.get("text") or "")[:180]
-        else:
-            hook_line = str(plan.get("hook_line") or (rows[0]["text"] if rows else ""))[:180]
-    else:
-        hook_line = str(plan.get("hook_line") or (rows[0]["text"] if rows else ""))[:180]
 
     reaction_hold = 0.0
     if show.get("keep_reactions"):
@@ -342,6 +418,8 @@ def _clamp_plan(plan, clip, rows, segments=None):
         "payoff_at": payoff,
         "retention_risk": str(plan.get("retention_risk") or "")[:200],
         "shot_order": shot_order,
+        "broll": _clamp_broll({**plan, "trim": trim, "emphasize": emphasize, "hook_line": hook_line, "payoff_at": payoff}, window, rows),
+        "drop_fillers": bool(plan.get("drop_fillers", True)),
         "reaction_hold": round(reaction_hold, 2) if show.get("keep_reactions") else 0.0,
         "show_type": show.get("id"),
         "caption_style": show.get("caption_style") or "hormozi",
@@ -431,11 +509,13 @@ def main():
             trimmed = plan["trim"]["end"] - plan["trim"]["start"]
             print(
                 f"   clip {i + 1} [{plan['pace']} {plan['goal']}] "
-                f"{trimmed:.1f}s · {len(plan['punch_ins'])} zooms · {plan['reason']}"
+                f"{trimmed:.1f}s · {len(plan['punch_ins'])} zooms · "
+                f"{len(plan.get('shot_order') or [])} beats · "
+                f"{len(plan.get('broll') or [])} cards · {plan['reason']}"
             )
     payload = {
-        "version": 2,
-        "layer": "reasoning",
+        "version": 3,
+        "layer": "producer",
         "rule_book": "config/editing_rules.md",
         "word_timings": has_words,
         "clips": [

@@ -36,16 +36,58 @@ def remove_time_overlap(results, iou_threshold=0.55):
     return unique
 
 
+def virality_breakdown(clip):
+    """Hook / emotion / info / completeness / picture / sound — 0 to 1, then a total."""
+    scores = clip.get("scores") or {}
+
+    def _ten(key, default=5):
+        try:
+            return min(1.0, max(0.0, float(scores.get(key, default)) / 10.0))
+        except (TypeError, ValueError):
+            return default / 10.0
+
+    try:
+        overall = min(1.0, max(0.0, float(clip.get("overall_score") or 0) / 100.0))
+    except (TypeError, ValueError):
+        overall = 0.0
+    duration = float(clip.get("duration_seconds") or (clip.get("end", 0) - clip.get("start", 0)))
+    fit = max((duration_fit(duration, p) for p in VIDEO_PLATFORMS), default=0.5)
+    visual = min(1.0, max(0.0, float(clip.get("visual_score") or 50) / 100.0))
+    audio = min(1.0, max(0.0, float(clip.get("audio_energy") or 50) / 100.0))
+    hook = _ten("hook")
+    emotion = _ten("emotion")
+    info = max(_ten("education"), _ten("curiosity"))
+    complete = _ten("completeness")
+    social = _ten("shareability")
+    total = (
+        100.0 * overall * (0.55 + 0.20 * fit + 0.10 * complete)
+        + 8.0 * hook
+        + 5.0 * emotion
+        + 4.0 * info
+        + 3.0 * social
+        + 2.0 * visual
+        + 2.0 * audio
+    )
+    return {
+        "hook": round(hook, 3),
+        "emotion": round(emotion, 3),
+        "info": round(info, 3),
+        "completeness": round(complete, 3),
+        "visual": round(visual, 3),
+        "audio": round(audio, 3),
+        "social": round(social, 3),
+        "total": round(total, 2),
+    }
+
+
 def ranking_score(clip):
     """
     Blend Gemini overall_score with platform fit, then bias toward the
     show type: laughs for comedy, insight keywords for interviews.
     """
-    base = float(clip.get("overall_score", 0))
-    duration = float(clip.get("duration_seconds") or (clip.get("end", 0) - clip.get("start", 0)))
-    best_fit = max((duration_fit(duration, p) for p in VIDEO_PLATFORMS), default=0.5)
-    completeness = (clip.get("scores") or {}).get("completeness", 7)
-    score = base * (0.65 + 0.25 * best_fit + 0.10 * (completeness / 10))
+    breakdown = virality_breakdown(clip)
+    clip["virality"] = breakdown
+    score = breakdown["total"]
     show = load_resolved()
     signals = clip.get("visual_signals") or {}
     if show.get("id") == "comedy":
@@ -180,7 +222,7 @@ def main():
         print(
             f"""
 Chunk: {clip['chunk_id']}
-Score: {clip.get('overall_score')}  rank={ranking_score(clip):.1f}  words={clip.get('word_score')}  visual={clip.get('visual_score')}  audio={clip.get('audio_energy')}
+Score: {clip.get('overall_score')}  rank={ranking_score(clip):.1f}  virality={clip.get('virality', {}).get('total')}  words={clip.get('word_score')}  visual={clip.get('visual_score')}  audio={clip.get('audio_energy')}
 Why: {clip.get('highlight_reason')}
 Time: {clip['start']}s -> {clip['end']}s  ({duration}s)
 Hook: {clip.get('hook')}

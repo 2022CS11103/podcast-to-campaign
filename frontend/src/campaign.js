@@ -1,5 +1,5 @@
 export const FLOW_STEPS = [
-  { id: "connect", label: "Connect", path: "/" },
+  { id: "connect", label: "Connect", path: "/accounts" },
   { id: "campaign", label: "Campaign", path: "/campaign" },
   { id: "strategy", label: "Content plan", path: "/strategy" },
   { id: "processing", label: "Processing", path: "/processing" },
@@ -8,48 +8,48 @@ export const FLOW_STEPS = [
 export const PROCESSING_STEPS = [
   {
     id: "video",
-    label: "Ingesting the talk",
-    description: "Securing the source and checking picture and audio quality.",
+    label: "Analyzing your podcast",
+    description: "Locking the source so the original never gets overwritten.",
   },
   {
     id: "transcript",
-    label: "Watching and listening",
-    description: "Scoring short opening chunks, then skipping the rest of the talk.",
+    label: "Listening for interesting moments",
+    description: "Finding the lines a viewer would actually stop for.",
   },
   {
     id: "highlight",
-    label: "Scoring standout moments",
-    description: "Ranking hooks, clarity, emotion, novelty, and visual energy.",
+    label: "Identifying standout clips",
+    description: "Keeping the hooks, payoffs, and educational segments.",
   },
   {
     id: "ranking",
-    label: "Choosing distinct cuts",
-    description: "Separating Shorts and Reels so every opening earns attention.",
+    label: "Finding potential Shorts",
+    description: "Different openings for Shorts, Reels, and posts.",
   },
   {
     id: "editing",
-    label: "Directing the edit",
-    description: "Planning jump cuts, punch-ins, captions, and keyword emphasis.",
+    label: "Editing and adapting clips",
+    description: "Stitch, reframe, captions, and motion — a first draft you can ship.",
   },
   {
     id: "routing",
-    label: "Adapting every platform",
-    description: "Matching format, duration, framing, and intent to each channel.",
+    label: "Fitting every platform",
+    description: "Length, framing, and tone matched to each channel.",
   },
   {
     id: "marketing",
-    label: "Writing campaign copy",
-    description: "Creating platform-native hooks, captions, titles, and CTAs.",
+    label: "Writing posts for each channel",
+    description: "Hooks, captions, and CTAs rewritten per platform — not copy-pasted.",
   },
   {
     id: "planning",
-    label: "Building the calendar",
-    description: "Spacing content across the campaign without repeating the same angle.",
+    label: "Building your 30-day content strategy",
+    description: "Each piece gets a date. You can pause a platform any time.",
   },
   {
     id: "packaging",
-    label: "Packaging your campaign",
-    description: "Rendering final assets and preparing the downloadable campaign kit.",
+    label: "Packaging the campaign",
+    description: "Final videos and copy, ready to review before anything goes live.",
   },
 ];
 
@@ -119,6 +119,14 @@ export const PLATFORM_META = {
   instagram: { name: "Instagram", detail: "Reels + carousels", tone: "pink" },
   linkedin: { name: "LinkedIn", detail: "Authority posts", tone: "blue" },
   twitter: { name: "Twitter / X", detail: "Threads + replies", tone: "slate" },
+};
+
+export const PLAN_PLATFORM_LABELS = {
+  instagram_reels: "Instagram Reels",
+  youtube_shorts: "YouTube Shorts",
+  tiktok: "TikTok",
+  linkedin: "LinkedIn",
+  twitter: "X",
 };
 
 export const CALENDAR_PLATFORMS = {

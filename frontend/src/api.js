@@ -84,4 +84,10 @@ export const creatorApi = {
     const query = year && month ? `?year=${year}&month=${month}` : "";
     return apiFetch(`/campaign-calendar${query}`);
   },
+  holdPlatform: (platform) =>
+    apiFetch("/schedule/hold", { method: "POST", body: JSON.stringify({ platform }) }),
+  resumePlatform: (platform) =>
+    apiFetch("/schedule/resume", { method: "POST", body: JSON.stringify({ platform }) }),
+  skipPost: (itemId) =>
+    apiFetch(`/schedule/skip/${itemId}`, { method: "POST" }),
 };

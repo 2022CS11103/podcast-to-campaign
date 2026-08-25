@@ -135,7 +135,9 @@ def _reduce_plan(plan: dict, override: dict) -> dict:
     for platform, config in (plan or {}).items():
         wanted = (override or {}).get(platform)
         count = int(config.get("count", 0) or 0)
-        if isinstance(wanted, dict) and wanted.get("count") is not None:
+        if isinstance(wanted, dict) and wanted.get("enabled") is False:
+            count = 0
+        elif isinstance(wanted, dict) and wanted.get("count") is not None:
             try:
                 count = min(count, max(0, int(wanted["count"])))
             except (TypeError, ValueError):

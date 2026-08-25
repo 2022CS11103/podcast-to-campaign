@@ -1,15 +1,15 @@
 """Maps backend job.step names to the 9-step Lovable processing UI."""
 
 UI_STEPS = [
-    {"id": "video", "index": 1, "label": "Ingesting the talk"},
-    {"id": "transcript", "index": 2, "label": "Watching and listening for standout moments"},
-    {"id": "highlight", "index": 3, "label": "Editor scoring hooks"},
-    {"id": "ranking", "index": 4, "label": "Picking distinct Shorts vs Reels"},
-    {"id": "editing", "index": 5, "label": "Directing cuts, zooms, and captions"},
-    {"id": "routing", "index": 6, "label": "Routing to each platform"},
-    {"id": "marketing", "index": 7, "label": "Writing captions like a strategist"},
-    {"id": "planning", "index": 8, "label": "Building the posting calendar"},
-    {"id": "packaging", "index": 9, "label": "Packaging the campaign kit"},
+    {"id": "video", "index": 1, "label": "Analyzing your podcast"},
+    {"id": "transcript", "index": 2, "label": "Listening for interesting moments"},
+    {"id": "highlight", "index": 3, "label": "Identifying standout clips"},
+    {"id": "ranking", "index": 4, "label": "Finding potential Shorts"},
+    {"id": "editing", "index": 5, "label": "Editing and adapting clips"},
+    {"id": "routing", "index": 6, "label": "Fitting every platform"},
+    {"id": "marketing", "index": 7, "label": "Writing posts for each channel"},
+    {"id": "planning", "index": 8, "label": "Building your 30-day content strategy"},
+    {"id": "packaging", "index": 9, "label": "Packaging the campaign"},
 ]
 
 # strategy/ranking both sit on UI step 4 (Highlight Detection)

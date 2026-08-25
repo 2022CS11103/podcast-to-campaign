@@ -169,7 +169,7 @@ def transcribe_window(video, start, duration, wav):
     print(f"  transcribe {start:.0f}s -> {start + duration:.0f}s")
     write_progress(
         stage="transcript",
-        label=f"Scoring chunk {int(start)}s–{int(start + duration)}s",
+        label="Watching and listening for standout moments",
         scanned_seconds=round(start, 1),
         max_scan_seconds=HARD_MAX_SCAN_SECONDS,
     )
@@ -261,7 +261,7 @@ def main():
         print(f"\nScanning {start:.0f}s -> {start + window:.0f}s ...")
         write_progress(
             stage="transcript",
-            label=f"Chunk {int(start / SCAN_WINDOW_SECONDS) + 1}: scoring {int(start)}s–{int(start + window)}s, then skip the rest if it is enough",
+            label="Watching and listening for standout moments",
             scanned_seconds=round(start, 1),
         max_scan_seconds=HARD_MAX_SCAN_SECONDS,
             source_seconds=round(duration, 1),
@@ -337,10 +337,7 @@ def main():
         )
         write_progress(
             stage="transcript",
-            label=(
-                f"Chunk scored — {len(usable)} usable of {needed} needed "
-                f"after {int(scanned)}s (cap {int(MAX_SCAN_SECONDS)}s)"
-            ),
+            label="Watching and listening for standout moments",
             scanned_seconds=round(scanned, 1),
         max_scan_seconds=HARD_MAX_SCAN_SECONDS,
             source_seconds=round(duration, 1),

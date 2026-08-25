@@ -126,6 +126,7 @@ def from_bank(bank: dict, year=None, month=None) -> dict:
     months = sorted({(d.year, d.month) for d in dates}) or [(year, month)]
     return {
         **build_month(items, year, month, campaign_start=start.isoformat() if start else None),
+        "holds": dict(bank.get("holds") or {}),
         "available_months": [
             {"year": y, "month": m, "label": date(y, m, 1).strftime("%B %Y")}
             for y, m in months
