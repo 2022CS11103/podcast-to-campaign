@@ -26,49 +26,135 @@ The calendar is a **plan**. Nothing publishes until you approve it. YouTube uplo
 | Media | FFmpeg, OpenCV, Whisper / faster-whisper |
 | Auth | Local accounts by default; optional Supabase + Google |
 
-## Quick start
+## How to run the app
 
-**Needs:** Python 3.10+, Node.js, [FFmpeg](https://ffmpeg.org/) on your PATH.
+Do these steps in order the first time. After that, jump to [Start it again](#start-it-again).
+
+### 0. What you need installed
+
+- Python 3.10 or newer  
+- Node.js 18 or newer  
+- [FFmpeg](https://ffmpeg.org/) on your PATH (`ffmpeg -version` should work)
+
+### 1. Open the project
 
 ```powershell
-cd creator-os
+git clone https://github.com/2022CS11103/podcast-to-campaign.git
+cd podcast-to-campaign
+```
+
+If you already have the folder, just `cd` into it (for example `C:\Users\hp\Downloads\creator-os`).
+
+### 2. Create a virtualenv and install Python packages
+
+```powershell
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
+```
 
+macOS/Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 3. Add a `.env` file
+
+In the **repo root** (same folder as `api/`), create `.env`. Do not commit this file.
+
+```
+GEMINI_API_KEY=your_key
+FRONTEND_URL=http://127.0.0.1:8000/app
+```
+
+You can rotate keys with `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, and so on.
+
+Optional — YouTube publish:
+
+```
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=http://127.0.0.1:8000/youtube/callback
+```
+
+Optional — Instagram / LinkedIn / X connect, plus `OAUTH_TOKEN_ENCRYPTION_KEY`.
+
+Studio login works with email/password with no extra setup. Google sign-in needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the frontend env, then a frontend rebuild.
+
+### 4. Build the studio UI
+
+FastAPI serves the built files in `frontend/dist`. You must build at least once:
+
+```powershell
 cd frontend
 npm install
 npm run build
 cd ..
+```
 
+### 5. Start the server
+
+From the **repo root**, with the venv still active:
+
+```powershell
 $env:PYTHONIOENCODING = "utf-8"
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open [http://127.0.0.1:8000/app/](http://127.0.0.1:8000/app/).
+macOS/Linux:
 
-After frontend changes, run `npm run build` in `frontend/` and hard-refresh `/app/`. Restart Uvicorn after Python changes (do not rely on `--reload` for this pipeline).
-
-## Environment
-
-Create a `.env` in the repo root (never commit it):
-
-```
-GEMINI_API_KEY=your_key
-# or rotate several: GEMINI_API_KEY_1, GEMINI_API_KEY_2, ...
-
-FRONTEND_URL=http://127.0.0.1:8000/app
-
-# Optional — YouTube publish
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=http://127.0.0.1:8000/youtube/callback
-
-# Optional — Instagram / LinkedIn / X connect
-# plus OAUTH_TOKEN_ENCRYPTION_KEY
+```bash
+export PYTHONIOENCODING=utf-8
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-Studio login works locally with email/password. For Google sign-in and cloud accounts, set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the frontend env and rebuild.
+Leave this terminal running. Do **not** use `--reload` for this pipeline — restart the process after Python changes.
+
+### 6. Open the app
+
+In a browser:
+
+**http://127.0.0.1:8000/app/**
+
+1. Create an account (or sign in).  
+2. You land on **Accounts** — connect channels or skip.  
+3. Go to **Content**, paste a YouTube/podcast URL or upload a video.  
+4. Set how many posts per platform, then generate.  
+5. Stay on the processing page until the campaign is ready, then review Library and Calendar.
+
+Health check: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) should return `{"status":"ok"}`.
+
+### Start it again
+
+After the first setup, each session is only:
+
+```powershell
+cd podcast-to-campaign
+.\.venv\Scripts\activate
+$env:PYTHONIOENCODING = "utf-8"
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+Then open **http://127.0.0.1:8000/app/** again.
+
+### If you change the code
+
+| What you changed | What to do |
+| --- | --- |
+| `frontend/src/...` | `cd frontend` → `npm run build` → hard-refresh `/app/` |
+| Python (`api/`, `scripts/`, `utils/`) | Stop Uvicorn (Ctrl+C) and start it again |
+
+Optional local UI hot-reload (API must already be on port 8000):
+
+```powershell
+cd frontend
+npm run dev
+```
+
+Then open the Vite URL (usually `http://127.0.0.1:5173/app/`). For a single URL that matches production, prefer `npm run build` + Uvicorn.
 
 ## Using the studio
 
