@@ -1,4 +1,4 @@
-# creatorOS
+# CreatorOS
 
 **One video. A month of content.**
 
