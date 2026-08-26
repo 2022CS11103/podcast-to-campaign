@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +9,7 @@ import os
 import time
 import uuid
 from pathlib import Path
+from typing import Optional
 from urllib.parse import unquote
 from dotenv import load_dotenv
 from api.schemas import (
@@ -571,7 +574,7 @@ def list_jobs():
 
 
 @app.post("/jobs/{job_id}/stop")
-def stop_job(job_id: str, req: StopJobRequest | None = None):
+def stop_job(job_id: str, req: Optional[StopJobRequest] = None):
     req = req or StopJobRequest()
     job = job_manager.get(job_id)
     if job is None:
@@ -658,7 +661,7 @@ def get_timing():
 
 
 @app.get("/campaign-calendar")
-def get_campaign_calendar(year: int | None = None, month: int | None = None):
+def get_campaign_calendar(year: Optional[int] = None, month: Optional[int] = None):
     if not CONTENT_BANK.exists():
         raise HTTPException(status_code=404, detail="Campaign calendar not found")
     with open(CONTENT_BANK, "r", encoding="utf-8") as f:

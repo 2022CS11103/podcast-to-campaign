@@ -34,7 +34,8 @@ def _public_error(exc: Exception) -> str:
     lowered = text.lower()
     bot = "not a bot" in lowered or "sign in to confirm" in lowered or "bot check" in lowered
     locked = "could not copy chrome cookie database" in lowered
-    if bot or locked:
+    forbidden = "http error 403" in lowered or "po token" in lowered or "403 forbidden" in lowered
+    if bot or locked or forbidden:
         marker = "YouTube blocked this download"
         if marker in text:
             return text[text.rfind(marker):].strip()[:1200]

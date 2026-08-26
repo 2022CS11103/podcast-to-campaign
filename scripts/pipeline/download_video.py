@@ -7,18 +7,73 @@ import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SIDECAR_PY = PROJECT_ROOT / ".tools" / "ytdlp" / "bin" / "python"
+
+
+def _bootstrap_ytdlp_sidecar() -> None:
+    """Current yt-dlp needs Python 3.10+. The app venv is still 3.9."""
+    if SIDECAR_PY.exists():
+        return
+    py = (
+        shutil.which("python3.12")
+        or shutil.which("python3.13")
+        or shutil.which("python3.11")
+        or shutil.which("python3.10")
+    )
+    if not py:
+        return
+    print("Installing a current yt-dlp (Python 3.10+ is required)...")
+    venv_dir = SIDECAR_PY.parent.parent
+    venv_dir.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([py, "-m", "venv", str(venv_dir)], check=True)
+    subprocess.run(
+        [
+            str(SIDECAR_PY),
+            "-m",
+            "pip",
+            "install",
+            "-U",
+            "pip",
+            "yt-dlp[default]",
+            "python-dotenv",
+        ],
+        check=True,
+    )
+
+
+def _reexec_with_current_ytdlp() -> None:
+    if sys.version_info >= (3, 10):
+        return
+    if Path(sys.executable).resolve() == SIDECAR_PY.resolve():
+        return
+    _bootstrap_ytdlp_sidecar()
+    if not SIDECAR_PY.exists():
+        return
+    os.execv(str(SIDECAR_PY), [str(SIDECAR_PY), *sys.argv])
+
+
+if __name__ == "__main__":
+    _reexec_with_current_ytdlp()
+
 import yt_dlp
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-# Cookie attempts use web/mweb so Netscape cookies actually apply.
-CLIENTS_ANON = ["android", "android_vr", "tv", "mweb"]
-CLIENTS_COOKIES = ["web", "mweb", "android"]
+# Prefer HLS. Progressive/HTTPS android formats 403 without a GVS PO token.
+CLIENTS_ANON = ["ios", "web_safari"]
+CLIENTS_COOKIES = []
+CLIENTS_DEFAULT = []
 
 BOT_HINTS = ("sign in to confirm", "not a bot", "confirm you’re not a bot", "confirm you're not a bot")
-LOCKED_COOKIE_HINT = "could not copy chrome cookie database"
+FORBIDDEN_HINTS = ("http error 403", "po token", "403 forbidden")
+LOCKED_COOKIE_HINTS = (
+    "could not copy chrome cookie database",
+    "could not find firefox cookies",
+    "failed to decrypt",
+    "keychain",
+)
 
 
 def canonical_youtube_url(url: str) -> str:
@@ -48,8 +103,14 @@ def _is_bot_check(exc: BaseException) -> bool:
     return any(hint in text for hint in BOT_HINTS)
 
 
+def _is_forbidden(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(hint in text for hint in FORBIDDEN_HINTS)
+
+
 def _is_locked_cookie_db(exc: BaseException) -> bool:
-    return LOCKED_COOKIE_HINT in str(exc).lower()
+    text = str(exc).lower()
+    return any(hint in text for hint in LOCKED_COOKIE_HINTS)
 
 
 def _js_runtimes():
@@ -121,27 +182,47 @@ def _cookie_files():
         yield path
 
 
-def _browser_installed(name: str) -> bool:
-    local = Path(os.environ.get("LOCALAPPDATA", ""))
-    roaming = Path(os.environ.get("APPDATA", ""))
-    roots = {
-        "edge": local / "Microsoft" / "Edge" / "User Data",
-        "chrome": local / "Google" / "Chrome" / "User Data",
-        "brave": local / "BraveSoftware" / "Brave-Browser" / "User Data",
-        "chromium": local / "Chromium" / "User Data",
-        "firefox": roaming / "Mozilla" / "Firefox" / "Profiles",
+def _browser_profile_roots():
+    home = Path.home()
+    if sys.platform == "darwin":
+        support = home / "Library" / "Application Support"
+        return {
+            "chrome": support / "Google" / "Chrome",
+            "edge": support / "Microsoft Edge",
+            "brave": support / "BraveSoftware" / "Brave-Browser",
+            "chromium": support / "Chromium",
+            "firefox": support / "Firefox" / "Profiles",
+        }
+    if sys.platform == "win32":
+        local = Path(os.environ.get("LOCALAPPDATA", ""))
+        roaming = Path(os.environ.get("APPDATA", ""))
+        return {
+            "edge": local / "Microsoft" / "Edge" / "User Data",
+            "chrome": local / "Google" / "Chrome" / "User Data",
+            "brave": local / "BraveSoftware" / "Brave-Browser" / "User Data",
+            "chromium": local / "Chromium" / "User Data",
+            "firefox": roaming / "Mozilla" / "Firefox" / "Profiles",
+        }
+    config = Path(os.environ.get("XDG_CONFIG_HOME", str(home / ".config")))
+    return {
+        "chrome": Path(config) / "google-chrome",
+        "edge": Path(config) / "microsoft-edge",
+        "brave": Path(config) / "BraveSoftware" / "Brave-Browser",
+        "chromium": Path(config) / "chromium",
+        "firefox": home / ".mozilla" / "firefox",
     }
-    root = roots.get(name)
+
+
+def _browser_installed(name: str) -> bool:
+    root = _browser_profile_roots().get(name)
     return bool(root and root.exists())
 
 
 def _browser_names():
     env_browser = os.getenv("YTDLP_COOKIES_FROM_BROWSER", "").strip().lower()
-    # Firefox cookies can be read while the browser is open. Chrome/Edge
-    # lock (and often encrypt) their cookie DB on Windows.
-    preferred = ("firefox", "edge", "chrome", "brave", "chromium")
-    if sys.platform != "win32":
-        preferred = ("chrome", "edge", "firefox", "brave", "chromium")
+    # Firefox cookies can be read while the browser is open and are enough
+    # to unlock HLS formats. Chrome/Edge often block on a locked cookie DB.
+    preferred = ("firefox", "chrome")
     ordered = []
     if env_browser:
         ordered.append(env_browser)
@@ -152,19 +233,25 @@ def _browser_names():
 
 
 def _auth_attempts():
-    for path in _cookie_files():
-        yield f"cookies file {path.name}", {"cookiefile": str(path)}, CLIENTS_COOKIES
     profile = os.getenv("YTDLP_BROWSER_PROFILE", "").strip() or None
     for browser in _browser_names():
         spec = (browser, profile) if profile else (browser,)
         yield f"cookies from {browser}", {"cookiesfrombrowser": spec}, CLIENTS_COOKIES
+    for path in _cookie_files():
+        yield f"cookies file {path.name}", {"cookiefile": str(path)}, CLIENTS_COOKIES
+    yield "yt-dlp default clients", {}, CLIENTS_DEFAULT
     yield "YouTube app clients", {}, CLIENTS_ANON
 
 
 def _base_opts(tmpl: str, clients: list) -> dict:
-    return {
-        "format": "bv*[height<=1080][height>=720]+ba/bv*[height<=1080]+ba/b[height<=1080]/b",
-        "format_sort": ["res:1080", "ext:mp4:m4a"],
+    opts = {
+        "format": (
+            "bv*[height<=1080][protocol^=m3u8]+ba[protocol^=m3u8]/"
+            "bv*[height<=1080][protocol^=m3u8]+ba/"
+            "bv*[height<=1080]+ba/"
+            "b[height<=1080]/b"
+        ),
+        "format_sort": ["res:1080", "proto:m3u8", "ext:mp4:m4a"],
         "merge_output_format": "mp4",
         "outtmpl": tmpl,
         "quiet": False,
@@ -172,10 +259,12 @@ def _base_opts(tmpl: str, clients: list) -> dict:
         "retries": 5,
         "fragment_retries": 5,
         "nocheckcertificate": True,
-        "extractor_args": {"youtube": {"player_client": clients}},
         "js_runtimes": _js_runtimes(),
         "remote_components": ["ejs:github"],
     }
+    if clients:
+        opts["extractor_args"] = {"youtube": {"player_client": clients}}
+    return opts
 
 
 def _clear_partials(input_dir: Path, output_path: Path) -> None:
@@ -185,8 +274,18 @@ def _clear_partials(input_dir: Path, output_path: Path) -> None:
         leftover.unlink()
 
 
-def _bot_help(url: str, tried: list[str], locked_cookies: bool = False) -> str:
+def _bot_help(url: str, tried: list[str], locked_cookies: bool = False, forbidden: bool = False) -> str:
     tried_txt = ", ".join(tried) if tried else "none"
+    if forbidden:
+        return (
+            "YouTube blocked this download (HTTP 403 / missing PO token).\n"
+            f"Watch URL: {url}\n"
+            f"Tried: {tried_txt}\n"
+            "Fastest fix: log into youtube.com in Firefox, then retry. "
+            "Firefox cookies can be read while the browser is open.\n"
+            "Or export a Netscape cookies.txt into the project folder "
+            "(or set YTDLP_COOKIES / YTDLP_COOKIES_FROM_BROWSER)."
+        )
     return (
         "YouTube blocked this download (bot check).\n"
         f"Watch URL: {url}\n"
@@ -203,6 +302,7 @@ def download_video(url):
     Downloads a YouTube video as MP4 into input/video.mp4
     """
     url = canonical_youtube_url(url)
+    print(f"yt-dlp {yt_dlp.version.__version__} on Python {sys.version.split()[0]}")
     print(f"Downloading: {url}")
 
     input_dir = PROJECT_ROOT / "input"
@@ -215,6 +315,7 @@ def download_video(url):
     last_error = None
     saw_bot = False
     saw_locked = False
+    saw_forbidden = False
     expected_duration = None
 
     for label, auth, clients in _auth_attempts():
@@ -234,6 +335,8 @@ def download_video(url):
             print(f"{label} failed: {exc}", file=sys.stderr)
             if _is_bot_check(exc):
                 saw_bot = True
+            if _is_forbidden(exc):
+                saw_forbidden = True
             if _is_locked_cookie_db(exc):
                 saw_locked = True
             if "is not a valid url" in str(exc).lower() or "unsupported url" in str(exc).lower():
@@ -269,8 +372,10 @@ def download_video(url):
         thin_keep.unlink()
 
     if not output_path.exists():
-        if saw_bot or saw_locked:
-            raise RuntimeError(_bot_help(url, tried, locked_cookies=saw_locked)) from last_error
+        if saw_bot or saw_locked or saw_forbidden:
+            raise RuntimeError(
+                _bot_help(url, tried, locked_cookies=saw_locked, forbidden=saw_forbidden)
+            ) from last_error
         if last_error:
             raise RuntimeError(f"DOWNLOAD FAILED: {last_error}") from last_error
         raise FileNotFoundError(f"Expected {output_path} after download")
