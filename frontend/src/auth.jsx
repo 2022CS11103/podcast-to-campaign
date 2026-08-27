@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { setAccessTokenProvider } from "./api";
+import { creatorApi, setAccessTokenProvider } from "./api";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -25,6 +25,34 @@ function readJson(key, fallback) {
 function localUser(session) {
   if (!session) return null;
   return session.user || session;
+}
+
+function loadGoogleScript() {
+  if (window.google?.accounts?.oauth2) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector("script[data-google-gsi]");
+    if (existing) {
+      if (window.google?.accounts?.oauth2) resolve();
+      else existing.addEventListener("load", () => resolve(), { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.dataset.googleGsi = "1";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Could not load Google sign-in."));
+    document.head.appendChild(script);
+  });
+}
+
+function googleProfileFromToken(accessToken) {
+  return fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  }).then(async (response) => {
+    if (!response.ok) throw new Error("Google did not return a profile.");
+    return response.json();
+  });
 }
 
 export function AuthProvider({ children }) {
@@ -99,13 +127,62 @@ export function AuthProvider({ children }) {
         return { error: null };
       },
       signInWithGoogle: async () => {
-        if (!supabase) {
-          return { error: { message: "Google sign-in is available once cloud login is connected." } };
+        if (supabase) {
+          return supabase.auth.signInWithOAuth({
+            provider: "google",
+            options: { redirectTo: `${window.location.origin}/app/accounts` },
+          });
         }
-        return supabase.auth.signInWithOAuth({
-          provider: "google",
-          options: { redirectTo: `${window.location.origin}/app/accounts` },
-        });
+        try {
+          const config = await creatorApi.authConfig();
+          const clientId = config.google_client_id;
+          if (!clientId) {
+            return {
+              error: {
+                message: "Add GOOGLE_CLIENT_ID to the project .env, then restart the server.",
+              },
+            };
+          }
+          await loadGoogleScript();
+          const profile = await new Promise((resolve, reject) => {
+            const client = window.google.accounts.oauth2.initTokenClient({
+              client_id: clientId,
+              scope: "openid email profile",
+              callback: (response) => {
+                if (response.error) {
+                  reject(new Error(response.error_description || response.error));
+                  return;
+                }
+                googleProfileFromToken(response.access_token).then(resolve).catch(reject);
+              },
+              error_callback: (error) => {
+                reject(new Error(error?.message || "Google sign-in was cancelled."));
+              },
+            });
+            client.requestAccessToken();
+          });
+          const next = {
+            user: {
+              email: profile.email,
+              user_metadata: { full_name: profile.name || profile.given_name || "Creator" },
+              picture: profile.picture,
+            },
+          };
+          localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+          setSession(next);
+          return { error: null };
+        } catch (error) {
+          const text = String(error?.message || error);
+          if (/origin is not allowed|redirect_uri|unauthorized/i.test(text)) {
+            return {
+              error: {
+                message:
+                  `Google blocked this origin (${window.location.origin}). In Google Cloud Console, add it under Authorized JavaScript origins for this OAuth client.`,
+              },
+            };
+          }
+          return { error: { message: text } };
+        }
       },
       resetPassword: async (email) => {
         if (supabase) {

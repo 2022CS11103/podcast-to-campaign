@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +9,7 @@ import os
 import time
 import uuid
 from pathlib import Path
+from typing import Optional
 from urllib.parse import unquote
 from dotenv import load_dotenv
 from api.schemas import (
@@ -20,6 +23,7 @@ from api.schemas import (
     StopJobRequest,
     ScopeJobRequest,
     ScheduleControlRequest,
+    ScheduleStatusRequest,
 )
 from api.job_manager import job_manager
 from api.pipeline_runner import start_worker, enqueue_job
@@ -36,14 +40,6 @@ from utils.pipeline_timer import format_duration, snapshot as timing_snapshot
 from utils.pipeline_steps import describe_step
 from utils.campaign_calendar import from_bank as calendar_from_bank
 from utils.content_plan import normalize_plan, load_plan, save_plan
-from utils.youtube_oauth import (
-    authorization_url as youtube_authorization_url,
-    configured as youtube_oauth_configured,
-    connection_status as youtube_connection_status,
-    disconnect as disconnect_youtube,
-    exchange_callback as exchange_youtube_callback,
-    upload_video as upload_youtube_video,
-)
 from utils.social_oauth import (
     all_statuses as social_account_statuses,
     authorization_url as social_authorization_url,
@@ -51,6 +47,42 @@ from utils.social_oauth import (
     disconnect as disconnect_social,
     exchange_callback as exchange_social_callback,
 )
+
+try:
+    from utils.youtube_oauth import (
+        authorization_url as youtube_authorization_url,
+        configured as youtube_oauth_configured,
+        connection_status as youtube_connection_status,
+        disconnect as disconnect_youtube,
+        exchange_callback as exchange_youtube_callback,
+        upload_video as upload_youtube_video,
+    )
+except ImportError:
+    def youtube_oauth_configured():
+        return False
+
+    def youtube_connection_status():
+        return {
+            "platform": "youtube",
+            "label": "YouTube",
+            "status": "not_configured",
+            "connected": False,
+        }
+
+    def youtube_authorization_url():
+        raise RuntimeError(
+            "YouTube connect needs google-auth-oauthlib. "
+            "Activate .venv and run: pip install google-auth-oauthlib"
+        )
+
+    def disconnect_youtube():
+        return None
+
+    def exchange_youtube_callback(*_args, **_kwargs):
+        raise RuntimeError("YouTube connect needs google-auth-oauthlib in the project venv.")
+
+    def upload_youtube_video(*_args, **_kwargs):
+        raise RuntimeError("YouTube upload needs google-auth-oauthlib in the project venv.")
 
 app = FastAPI(title="CreatorOS API")
 
@@ -102,6 +134,15 @@ def root():
 @app.get("/health")
 def health():
     return JSONResponse({"status": "ok"})
+
+
+@app.get("/auth/config")
+def auth_login_config():
+    """Public Google client id for studio sign-in. Never returns the secret."""
+    return {
+        "google_client_id": os.getenv("GOOGLE_CLIENT_ID", "").strip(),
+        "google_signin": bool(os.getenv("GOOGLE_CLIENT_ID", "").strip()),
+    }
 
 
 @app.get("/studio")
@@ -211,6 +252,63 @@ def _item_play_url(item):
     return _play_url(item.get("platform_video_file")) or _play_url(item.get("video_file"))
 
 
+POST_DECK_FILES = {
+    "linkedin": "linkedin.md",
+    "twitter": "twitter.md",
+    "youtube_shorts": "youtube.md",
+    "instagram_reels": "instagram.md",
+    "tiktok": "tiktok.md",
+}
+
+
+def _item_post_path(item):
+    """Resolve a per-clip markdown post, including paths from another machine."""
+    candidates = []
+    raw = item.get("post_file")
+    if raw:
+        stored = Path(raw)
+        candidates.append(stored if stored.is_absolute() else PROJECT_ROOT / stored)
+        candidates.append(PROJECT_ROOT / "output" / "posts" / stored.name)
+    item_id = item.get("id")
+    platform = item.get("assigned_platform")
+    if item_id and platform:
+        candidates.append(
+            PROJECT_ROOT / "output" / "posts" / f"{item_id}_{platform}.md"
+        )
+    seen = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.exists() and path.is_file():
+            return path
+    return None
+
+
+def _read_post_markdown(item, limit=20000):
+    path = _item_post_path(item)
+    if path is None:
+        return ""
+    try:
+        return path.read_text(encoding="utf-8")[:limit]
+    except OSError:
+        return ""
+
+
+def _campaign_post_decks(limit=40000):
+    decks = {}
+    for platform, filename in POST_DECK_FILES.items():
+        path = PROJECT_ROOT / "output" / filename
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            decks[platform] = path.read_text(encoding="utf-8")[:limit]
+        except OSError:
+            continue
+    return decks
+
+
 def _media_fallback(folder: str, filename: str):
     """If a platform copy was wiped mid-job, serve the source cut instead."""
     if not CONTENT_BANK.exists():
@@ -273,6 +371,9 @@ def _decorate_board_items(raw_items):
         row["play_url"] = _item_play_url(item)
         row["display_hook"] = chosen.get("hook") or item.get("hook")
         row["display_caption"] = chosen.get("caption") or item.get("summary")
+        row["post_markdown"] = _read_post_markdown(item)
+        post_path = _item_post_path(item)
+        row["post_url"] = _play_url(str(post_path)) if post_path else None
         row["display_angle"] = chosen.get("angle") or item.get("content_angle")
         row["variant_id"] = chosen.get("id") or item.get("active_variant") or "A"
         row["same_moment"] = bool(also_on)
@@ -311,6 +412,7 @@ def campaign_board():
             "audio_visual" if scan.get("visual_analysis") else "audio_first"
         ),
         "items": items,
+        "campaign_posts": _campaign_post_decks(),
         "calendar": calendar_from_bank({**bank, "items": items}) if items else None,
         "holds": dict(bank.get("holds") or {}),
     }
@@ -390,6 +492,8 @@ def _youtube_upload_item(item_id: str = None):
     ]
     if item_id:
         candidates = [item for item in candidates if item.get("id") == item_id]
+    else:
+        candidates = [item for item in candidates if _is_publishable(item)]
     if not candidates:
         raise HTTPException(status_code=404, detail="No matching YouTube Short found.")
     return bank, candidates[0]
@@ -419,6 +523,11 @@ def youtube_upload(req: YouTubeUploadRequest):
     if not status.get("connected"):
         raise HTTPException(status_code=401, detail="Connect YouTube before uploading.")
     bank, item = _youtube_upload_item(req.item_id)
+    if not _is_publishable(item):
+        raise HTTPException(
+            status_code=409,
+            detail="This clip is not scheduled. Set it to Scheduled in the library first.",
+        )
     path = _approved_youtube_path(item)
     variants = item.get("variants") or []
     active = next(
@@ -571,7 +680,7 @@ def list_jobs():
 
 
 @app.post("/jobs/{job_id}/stop")
-def stop_job(job_id: str, req: StopJobRequest | None = None):
+def stop_job(job_id: str, req: Optional[StopJobRequest] = None):
     req = req or StopJobRequest()
     job = job_manager.get(job_id)
     if job is None:
@@ -628,8 +737,7 @@ def next_scheduled_post():
 
     pending = [
         item for item in data["items"]
-        if item.get("status") in ("pending", "scheduled_repost")
-        and not (data.get("holds") or {}).get(item.get("assigned_platform"))
+        if _is_publishable(item)
     ]
     if not pending:
         return {"message": "No pending items to post"}
@@ -658,7 +766,7 @@ def get_timing():
 
 
 @app.get("/campaign-calendar")
-def get_campaign_calendar(year: int | None = None, month: int | None = None):
+def get_campaign_calendar(year: Optional[int] = None, month: Optional[int] = None):
     if not CONTENT_BANK.exists():
         raise HTTPException(status_code=404, detail="Campaign calendar not found")
     with open(CONTENT_BANK, "r", encoding="utf-8") as f:
@@ -699,12 +807,26 @@ def _write_bank(bank):
         json.dump(bank, f, indent=2, ensure_ascii=False)
 
 
-def _schedule_payload(bank):
+def _schedule_payload(bank, year=None, month=None):
     return {
         "holds": dict(bank.get("holds") or {}),
-        "calendar": calendar_from_bank(bank),
+        "calendar": calendar_from_bank(bank, year=year, month=month),
         "items": bank.get("items") or [],
     }
+
+
+PUBLISHABLE_STATUSES = ("pending", "scheduled", "scheduled_repost")
+
+
+def _is_publishable(item: dict) -> bool:
+    return (item.get("status") or "pending") in PUBLISHABLE_STATUSES
+
+
+def _item_by_id(bank, item_id):
+    for item in bank.get("items") or []:
+        if item.get("id") == item_id:
+            return item
+    return None
 
 
 @app.post("/schedule/hold")
@@ -718,12 +840,20 @@ def hold_platform(req: ScheduleControlRequest):
     bank["holds"] = holds
     paused = 0
     for item in bank.get("items") or []:
-        if item.get("assigned_platform") == key and item.get("status") in ("pending", "scheduled_repost"):
-            item["status"] = "paused"
-            item["paused_reason"] = "platform_hold"
-            paused += 1
+        if item.get("assigned_platform") != key:
+            continue
+        if item.get("status") in ("posted", "skipped", "ai_generated"):
+            continue
+        item["status"] = "paused"
+        item["paused_reason"] = "platform_hold"
+        paused += 1
     _write_bank(bank)
-    return {"status": "held", "platform": key, "paused": paused, **_schedule_payload(bank)}
+    return {
+        "status": "held",
+        "platform": key,
+        "paused": paused,
+        **_schedule_payload(bank, year=req.year, month=req.month),
+    }
 
 
 @app.post("/schedule/resume")
@@ -737,29 +867,143 @@ def resume_platform(req: ScheduleControlRequest):
     bank["holds"] = holds
     restored = 0
     for item in bank.get("items") or []:
-        if item.get("assigned_platform") == key and item.get("status") == "paused":
-            item["status"] = "pending"
+        if item.get("assigned_platform") != key:
+            continue
+        if item.get("status") == "paused" and item.get("paused_reason") in (None, "platform_hold"):
+            item["status"] = "scheduled"
             item.pop("paused_reason", None)
             restored += 1
     _write_bank(bank)
-    return {"status": "live", "platform": key, "restored": restored, **_schedule_payload(bank)}
+    return {
+        "status": "live",
+        "platform": key,
+        "restored": restored,
+        **_schedule_payload(bank, year=req.year, month=req.month),
+    }
 
 
 @app.post("/schedule/skip/{item_id}")
-def skip_scheduled_item(item_id: str):
+def skip_scheduled_item(item_id: str, req: Optional[ScheduleControlRequest] = None):
+    req = req or ScheduleControlRequest()
     bank = _read_bank()
-    found = None
-    for item in bank.get("items") or []:
-        if item.get("id") == item_id:
-            if item.get("status") == "posted":
-                raise HTTPException(status_code=400, detail="This post already went out.")
-            item["status"] = "skipped"
-            found = item
-            break
+    found = _item_by_id(bank, item_id)
     if not found:
         raise HTTPException(status_code=404, detail="Scheduled post not found.")
+    if found.get("status") == "posted":
+        raise HTTPException(status_code=400, detail="This post already went out.")
+    found["status"] = "skipped"
+    found.pop("paused_reason", None)
     _write_bank(bank)
-    return {"status": "skipped", "item_id": item_id, **_schedule_payload(bank)}
+    return {
+        "status": "skipped",
+        "item_id": item_id,
+        **_schedule_payload(bank, year=req.year, month=req.month),
+    }
+
+
+@app.post("/schedule/pause/{item_id}")
+def pause_scheduled_item(item_id: str, req: Optional[ScheduleControlRequest] = None):
+    req = req or ScheduleControlRequest()
+    bank = _read_bank()
+    found = _item_by_id(bank, item_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Scheduled post not found.")
+    if found.get("status") == "posted":
+        raise HTTPException(status_code=400, detail="This post already went out.")
+    found["status"] = "paused"
+    found["paused_reason"] = "item"
+    _write_bank(bank)
+    return {
+        "status": "paused",
+        "item_id": item_id,
+        **_schedule_payload(bank, year=req.year, month=req.month),
+    }
+
+
+@app.post("/schedule/resume-item/{item_id}")
+def resume_scheduled_item(item_id: str, req: Optional[ScheduleControlRequest] = None):
+    req = req or ScheduleControlRequest()
+    bank = _read_bank()
+    found = _item_by_id(bank, item_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Scheduled post not found.")
+    if found.get("status") == "posted":
+        raise HTTPException(status_code=400, detail="This post already went out.")
+    found["status"] = "scheduled"
+    found.pop("paused_reason", None)
+    _write_bank(bank)
+    return {
+        "status": "live",
+        "item_id": item_id,
+        **_schedule_payload(bank, year=req.year, month=req.month),
+    }
+
+
+ITEM_STATUS_ALIASES = {
+    "ai_generated": "ai_generated",
+    "aigenerated": "ai_generated",
+    "generated": "ai_generated",
+    "draft": "ai_generated",
+    "scheduled": "scheduled",
+    "pending": "scheduled",
+    "scheduled_repost": "scheduled",
+    "paused": "paused",
+    "review": "paused",
+    "needs_review": "paused",
+    "needs_review_paused": "paused",
+    "posted": "posted",
+    "published": "posted",
+    "skipped": "skipped",
+    "wont_post": "skipped",
+    "wontpost": "skipped",
+    "cancel": "skipped",
+    "cancelled": "skipped",
+    "canceled": "skipped",
+}
+
+
+def _canonical_item_status(raw: str) -> str:
+    key = (raw or "").strip().lower().replace(" ", "_").replace("-", "_").replace("'", "")
+    mapped = ITEM_STATUS_ALIASES.get(key)
+    if not mapped:
+        raise HTTPException(status_code=400, detail="Unknown post status.")
+    return mapped
+
+
+def _apply_item_status(item: dict, status: str) -> str:
+    canonical = _canonical_item_status(status)
+    if canonical == "paused":
+        item["status"] = "paused"
+        item["paused_reason"] = item.get("paused_reason") or "item"
+    elif canonical == "posted":
+        item["status"] = "posted"
+        item.pop("paused_reason", None)
+        item.setdefault("posted_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    elif canonical == "skipped":
+        item["status"] = "skipped"
+        item.pop("paused_reason", None)
+    elif canonical == "ai_generated":
+        item["status"] = "ai_generated"
+        item.pop("paused_reason", None)
+    else:
+        item["status"] = "scheduled"
+        item.pop("paused_reason", None)
+    return canonical
+
+
+@app.post("/schedule/status/{item_id}")
+def set_scheduled_item_status(item_id: str, req: ScheduleStatusRequest):
+    bank = _read_bank()
+    found = _item_by_id(bank, item_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="Scheduled post not found.")
+    canonical = _apply_item_status(found, req.status)
+    _write_bank(bank)
+    return {
+        "status": canonical,
+        "item_id": item_id,
+        **_schedule_payload(bank, year=req.year, month=req.month),
+    }
 
 
 @app.get("/download-campaign/{job_id}")

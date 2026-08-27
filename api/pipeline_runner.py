@@ -34,15 +34,15 @@ def _public_error(exc: Exception) -> str:
     lowered = text.lower()
     bot = "not a bot" in lowered or "sign in to confirm" in lowered or "bot check" in lowered
     locked = "could not copy chrome cookie database" in lowered
-    if bot or locked:
+    forbidden = "http error 403" in lowered or "po token" in lowered or "403 forbidden" in lowered
+    if bot or locked or forbidden:
         marker = "YouTube blocked this download"
         if marker in text:
             return text[text.rfind(marker):].strip()[:1200]
         return (
-            "YouTube blocked the download (bot check). "
-            "Open Firefox, log into youtube.com, then Try Again. "
-            "Keep Firefox open — Chrome/Edge can stay open. "
-            "Chrome/Edge cookies cannot be read on Windows while those browsers are running."
+            "YouTube blocked the download. "
+            "Try Again — paste-a-link does not require a signed-in browser. "
+            "If YouTube keeps challenging this network, upload the MP4 instead."
         )
     return text
 

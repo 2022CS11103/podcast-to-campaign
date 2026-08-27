@@ -123,12 +123,25 @@ def from_bank(bank: dict, year=None, month=None) -> dict:
         anchor = start or (dates[0] if dates else date.today())
         year = year or anchor.year
         month = month or anchor.month
-    months = sorted({(d.year, d.month) for d in dates}) or [(year, month)]
+    span = dates + ([start] if start else [])
+    months = []
+    if span:
+        first = min(span)
+        last = max(span)
+        y, m = first.year, first.month
+        while (y, m) <= (last.year, last.month):
+            months.append((y, m))
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+    if not months:
+        months = [(year, month)]
     return {
         **build_month(items, year, month, campaign_start=start.isoformat() if start else None),
         "holds": dict(bank.get("holds") or {}),
         "available_months": [
-            {"year": y, "month": m, "label": date(y, m, 1).strftime("%B %Y")}
-            for y, m in months
+            {"year": yy, "month": mm, "label": date(yy, mm, 1).strftime("%B %Y")}
+            for yy, mm in months
         ],
     }
