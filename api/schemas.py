@@ -33,6 +33,7 @@ class ProcessRequest(BaseModel):
         for src, dest in (
             ("brand_name", "brand_name"),
             ("website", "website"),
+            ("tagline", "tagline"),
             ("goal", "goal"),
             ("primary_goal", "goal"),
             ("audience", "audience"),
@@ -42,8 +43,13 @@ class ProcessRequest(BaseModel):
             ("campaign_duration_days", "campaign_duration_days"),
             ("posting_duration_days", "campaign_duration_days"),
             ("campaign_start_date", "campaign_start_date"),
+            ("logo_path", "logo_path"),
+            ("end_screen_enabled", "end_screen_enabled"),
+            ("end_screen_duration", "end_screen_duration"),
+            ("end_screen_template", "end_screen_template"),
+            ("end_screen_cta", "end_screen_cta"),
         ):
-            if data.get(src) not in (None, "") and dest not in brand:
+            if src in data and data.get(src) is not None and dest not in brand:
                 brand[dest] = data[src]
         if brand:
             data["brand_context"] = brand
@@ -149,3 +155,21 @@ class RecommendPlanRequest(BaseModel):
             if k != "brand_context" and v not in (None, ""):
                 ctx.setdefault(k, v)
         return ctx
+
+
+class BrandUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    brand_name: Optional[str] = None
+    website: Optional[str] = None
+    tagline: Optional[str] = None
+    logo_path: Optional[str] = None
+    end_screen_enabled: Optional[bool] = None
+    end_screen_duration: Optional[int] = None
+    end_screen_template: Optional[str] = None
+    end_screen_cta: Optional[str] = None
+    goal: Optional[str] = None
+    audience: Optional[str] = None
+    tone: Optional[str] = None
+    show_type: Optional[str] = None
+    campaign_duration_days: Optional[int] = None
+    campaign_start_date: Optional[str] = None

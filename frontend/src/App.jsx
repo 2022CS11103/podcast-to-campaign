@@ -40,6 +40,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { BrandingFields, brandPayloadFromForm, formFromBrand } from "./branding";
 import { BrandIcon } from "./BrandIcon";
 import { AuthProvider, useAuth } from "./auth";
 import { apiUrl, creatorApi } from "./api";
@@ -603,8 +604,23 @@ function Field({ label, hint, children, wide }) {
 function CampaignPage({ campaign, setCampaign }) {
   const navigate = useNavigate();
   const [uploading, setUploading] = useState(false);
+  const [logoUploading, setLogoUploading] = useState(false);
   const [error, setError] = useState("");
   const update = (key, value) => setCampaign((current) => ({ ...current, [key]: value }));
+
+  useEffect(() => {
+    creatorApi.getBrand().then((brand) => {
+      setCampaign((current) => ({
+        ...current,
+        hasLogo: Boolean(brand.has_logo),
+        logoCache: Date.now(),
+        tagline: current.tagline || brand.tagline || "",
+        endScreenCta: current.endScreenCta || brand.end_screen_cta || "",
+        endScreenTemplate: current.endScreenTemplate || brand.end_screen_template || "logo_name_website",
+        endScreenDuration: current.endScreenDuration || brand.end_screen_duration || 3,
+      }));
+    }).catch(() => {});
+  }, [setCampaign]);
 
   const handleFile = async (file) => {
     if (!file) return;
@@ -621,9 +637,41 @@ function CampaignPage({ campaign, setCampaign }) {
     }
   };
 
+  const handleLogo = async (file) => {
+    if (!file) return;
+    setLogoUploading(true);
+    setError("");
+    try {
+      await creatorApi.uploadLogo(file);
+      setCampaign((current) => ({
+        ...current,
+        hasLogo: true,
+        logoCache: Date.now(),
+        logoName: file.name,
+      }));
+    } catch (uploadError) {
+      setError(uploadError.message);
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  const handleClearLogo = async () => {
+    try {
+      await creatorApi.clearLogo();
+      setCampaign((current) => ({ ...current, hasLogo: false, logoName: "", logoPreview: "" }));
+    } catch (clearError) {
+      setError(clearError.message);
+    }
+  };
+
   const continueNext = () => {
     if (!campaign.source.trim()) {
       setError(campaign.sourceType === "url" ? "Paste a YouTube or podcast URL to continue." : "Choose a video file to continue.");
+      return;
+    }
+    if (campaign.endScreenEnabled && !String(campaign.brandName || "").trim()) {
+      setError("Brand name is required for the end screen.");
       return;
     }
     setError("");
@@ -710,6 +758,47 @@ function CampaignPage({ campaign, setCampaign }) {
             <input type="date" value={campaign.startDate} onChange={(e) => update("startDate", e.target.value)} />
           </Field>
         </div>
+      </section>
+      <section className="panel campaign-panel" style={{ marginTop: 18 }}>
+        <div className="section-heading">
+          <div>
+            <span className="overline">Branding</span>
+            <h2>End screen</h2>
+          </div>
+        </div>
+        <BrandingFields
+          value={{
+            brandName: campaign.brandName,
+            website: campaign.website,
+            tagline: campaign.tagline || "",
+            endScreenEnabled: Boolean(campaign.endScreenEnabled),
+            endScreenDuration: campaign.endScreenDuration || 3,
+            endScreenTemplate: campaign.endScreenTemplate || "logo_name_website",
+            endScreenCta: campaign.endScreenCta || "",
+            hasLogo: Boolean(campaign.hasLogo),
+            logoCache: campaign.logoCache,
+            logoName: campaign.logoName,
+            logoPreview: campaign.logoPreview,
+          }}
+          onChange={(next) => setCampaign((current) => ({
+            ...current,
+            brandName: next.brandName,
+            website: next.website,
+            tagline: next.tagline,
+            endScreenEnabled: next.endScreenEnabled,
+            endScreenDuration: next.endScreenDuration,
+            endScreenTemplate: next.endScreenTemplate,
+            endScreenCta: next.endScreenCta,
+            hasLogo: next.hasLogo,
+            logoCache: next.logoCache,
+            logoName: next.logoName,
+            logoPreview: next.logoPreview,
+          }))}
+          logoUploading={logoUploading}
+          onLogoUpload={handleLogo}
+          onClearLogo={handleClearLogo}
+          compact
+        />
       </section>
       {error && <Notice>{error}</Notice>}
       <div className="page-actions">
@@ -1795,17 +1884,90 @@ function CalendarStudio() {
   );
 }
 
-function WorkspacePage({ accounts, refreshAccounts, accountBusy }) {
+function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign }) {
   const auth = useAuth();
   const navigate = useNavigate();
   const connected = (accounts || []).filter((item) => item.connected);
+  const [brandForm, setBrandForm] = useState(() => formFromBrand());
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [brandSaving, setBrandSaving] = useState(false);
+  const [brandError, setBrandError] = useState("");
+  const [brandSaved, setBrandSaved] = useState(false);
+
+  useEffect(() => {
+    creatorApi.getBrand().then((brand) => setBrandForm(formFromBrand(brand))).catch(() => {});
+  }, []);
+
+  const syncCampaign = (form) => {
+    if (!setCampaign) return;
+    setCampaign((current) => ({
+      ...current,
+      brandName: form.brandName,
+      website: form.website,
+      tagline: form.tagline,
+      endScreenEnabled: form.endScreenEnabled,
+      endScreenDuration: form.endScreenDuration,
+      endScreenTemplate: form.endScreenTemplate,
+      endScreenCta: form.endScreenCta,
+      hasLogo: form.hasLogo,
+      logoCache: form.logoCache,
+    }));
+  };
+
+  const handleLogo = async (file) => {
+    if (!file) return;
+    setLogoUploading(true);
+    setBrandError("");
+    try {
+      await creatorApi.uploadLogo(file);
+      const next = { ...brandForm, hasLogo: true, logoCache: Date.now(), logoName: file.name };
+      setBrandForm(next);
+      syncCampaign(next);
+    } catch (uploadError) {
+      setBrandError(uploadError.message);
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  const handleClearLogo = async () => {
+    try {
+      await creatorApi.clearLogo();
+      const next = { ...brandForm, hasLogo: false, logoName: "", logoPreview: "" };
+      setBrandForm(next);
+      syncCampaign(next);
+    } catch (clearError) {
+      setBrandError(clearError.message);
+    }
+  };
+
+  const saveBrand = async () => {
+    if (brandForm.endScreenEnabled && !String(brandForm.brandName || "").trim()) {
+      setBrandError("Brand name is required for the end screen.");
+      return;
+    }
+    setBrandSaving(true);
+    setBrandError("");
+    setBrandSaved(false);
+    try {
+      const saved = await creatorApi.saveBrand(brandPayloadFromForm(brandForm));
+      const next = formFromBrand(saved);
+      setBrandForm(next);
+      syncCampaign(next);
+      setBrandSaved(true);
+    } catch (saveError) {
+      setBrandError(saveError.message);
+    } finally {
+      setBrandSaving(false);
+    }
+  };
 
   return (
     <AppShell flow={false}>
       <PageHeading
         eyebrow="Settings"
         title="Your workspace"
-        description="Accounts, schedule control, and sign out — the whole campaign stays here."
+        description="Branding, accounts, schedule control, and sign out — the whole campaign stays here."
       />
       <section className="panel campaign-panel">
         <div className="section-heading">
@@ -1850,6 +2012,27 @@ function WorkspacePage({ accounts, refreshAccounts, accountBusy }) {
             <Link2 size={16} /> Manage connections
           </button>
         </div>
+      </section>
+      <section className="panel campaign-panel" style={{ marginTop: 18 }}>
+        <div className="section-heading">
+          <div>
+            <span className="overline">Branding</span>
+            <h2>End screen</h2>
+          </div>
+          <button className="primary-button compact" onClick={saveBrand} disabled={brandSaving}>
+            {brandSaving ? <LoaderCircle className="spin" size={16} /> : null}
+            Save branding
+          </button>
+        </div>
+        <BrandingFields
+          value={brandForm}
+          onChange={setBrandForm}
+          logoUploading={logoUploading}
+          onLogoUpload={handleLogo}
+          onClearLogo={handleClearLogo}
+        />
+        {brandError ? <Notice>{brandError}</Notice> : null}
+        {brandSaved ? <Notice type="success">Brand end screen saved. It applies to the next campaign you generate.</Notice> : null}
       </section>
     </AppShell>
   );
@@ -2092,6 +2275,10 @@ function CreatorApp() {
   }, [refreshAccounts]);
 
   const generate = async () => {
+    if (campaign.endScreenEnabled && !String(campaign.brandName || "").trim()) {
+      window.alert("Brand name is required for the end screen.");
+      return;
+    }
     setGenerating(true);
     try {
       const contentPlan = Object.fromEntries(
@@ -2100,19 +2287,33 @@ function CreatorApp() {
           { count: item.count, interval_days: item.interval_days, purpose: item.purpose },
         ]),
       );
+      let savedBrand = {};
+      try {
+        savedBrand = await creatorApi.getBrand();
+      } catch {
+        savedBrand = {};
+      }
+      const { has_logo: _hasLogo, logo_url: _logoUrl, ...brandRest } = savedBrand;
       const result = await creatorApi.startCampaign({
         source: campaign.source,
         campaign_start_date: campaign.startDate,
         content_plan: contentPlan,
         brand_context: {
+          ...brandRest,
           brand_name: campaign.brandName,
           website: campaign.website,
+          tagline: campaign.tagline || savedBrand.tagline || "",
           goal: campaign.goal,
           audience: campaign.audience,
           tone: campaign.tone,
           show_type: campaign.showType || "auto",
           campaign_duration_days: campaign.durationDays,
           campaign_start_date: campaign.startDate,
+          logo_path: savedBrand.logo_path || "",
+          end_screen_enabled: Boolean(campaign.endScreenEnabled),
+          end_screen_duration: Number(campaign.endScreenDuration || savedBrand.end_screen_duration || 3),
+          end_screen_template: campaign.endScreenTemplate || savedBrand.end_screen_template || "logo_name_website",
+          end_screen_cta: campaign.endScreenCta || savedBrand.end_screen_cta || "",
         },
       });
       setCurrentJob(result.job_id);
@@ -2144,7 +2345,7 @@ function CreatorApp() {
       <Route path="/complete/:jobId" element={<CompletionPage currentJob={currentJob} />} />
       <Route path="/results/:jobId" element={<ResultsPage currentJob={currentJob} />} />
       <Route path="/calendar" element={<CalendarStudio />} />
-      <Route path="/workspace" element={<WorkspacePage accounts={accounts} refreshAccounts={refreshAccounts} accountBusy={accountBusy} />} />
+      <Route path="/workspace" element={<WorkspacePage accounts={accounts} refreshAccounts={refreshAccounts} accountBusy={accountBusy} setCampaign={setCampaign} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

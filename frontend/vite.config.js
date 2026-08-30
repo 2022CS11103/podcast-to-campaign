@@ -16,6 +16,8 @@ export default defineConfig({
       "/connect": "http://127.0.0.1:8000",
       "/oauth": "http://127.0.0.1:8000",
       "/media": "http://127.0.0.1:8000",
+      "/brand": "http://127.0.0.1:8000",
+      "/uploads": "http://127.0.0.1:8000",
       "/download-campaign": "http://127.0.0.1:8000",
     },
   },

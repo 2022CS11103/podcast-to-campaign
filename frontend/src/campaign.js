@@ -34,7 +34,7 @@ export const PROCESSING_STEPS = [
   {
     id: "routing",
     label: "Fitting every platform",
-    description: "Length, framing, and tone matched to each channel.",
+    description: "Length, framing, and brand end screen matched to each channel.",
   },
   {
     id: "marketing",
@@ -75,6 +75,11 @@ export const DEFAULT_CAMPAIGN = {
   source: "",
   brandName: "CreatorOS",
   website: "",
+  tagline: "",
+  endScreenEnabled: false,
+  endScreenDuration: 3,
+  endScreenTemplate: "logo_name_website",
+  endScreenCta: "",
   goal: "Brand awareness",
   audience: "Startup founders",
   tone: "Professional",
