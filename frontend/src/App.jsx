@@ -16,7 +16,9 @@ import {
   Check,
   CheckCircle2,
   Clock3,
+  Copy,
   Download,
+  FileText,
   FileVideo,
   Film,
   Home,
@@ -68,12 +70,18 @@ function useStoredState(key, initialValue) {
   return [value, setValue];
 }
 
+function BrandMark({ size = 44, alt = "creatorOS" }) {
+  return (
+    <div className="brand-mark" style={{ width: size, height: size }}>
+      <img src={LOGO_URL} alt={alt} />
+    </div>
+  );
+}
+
 function Logo() {
   return (
     <div className="brand">
-      <div className="brand-mark">
-        <img src={LOGO_URL} alt="creatorOS" />
-      </div>
+      <BrandMark />
       <div>
         <strong>creator<span className="brand-os">OS</span></strong>
         <span className="brand-tagline">One video. A month of content.</span>
@@ -143,7 +151,7 @@ function AppShell({ children, step, flow = true }) {
           <div className="mini-icon"><Sparkles size={16} /></div>
           <div>
             <strong>Create once</strong>
-            <p>Repurpose everywhere. Pause a platform any day — the campaign stays.</p>
+            <p>Repurpose everywhere. Pause any date — the campaign stays.</p>
           </div>
         </div>
         <div className="account-chip">
@@ -223,6 +231,101 @@ function Notice({ type = "info", children, onClose }) {
   );
 }
 
+async function copyText(text) {
+  const value = String(text || "");
+  if (!value) throw new Error("Nothing to copy");
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.left = "-9999px";
+  document.body.appendChild(field);
+  field.select();
+  document.execCommand("copy");
+  field.remove();
+}
+
+function CopyButton({ text, label = "Copy" }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      className="ghost-button copy-button"
+      disabled={!text}
+      onClick={async () => {
+        try {
+          await copyText(text);
+          setDone(true);
+          window.setTimeout(() => setDone(false), 1400);
+        } catch {
+          setDone(false);
+        }
+      }}
+    >
+      {done ? <Check size={14} /> : <Copy size={14} />}
+      {done ? "Copied" : label}
+    </button>
+  );
+}
+
+function itemPostText(item) {
+  if (item?.post_markdown) return item.post_markdown;
+  const hook = item?.display_hook || item?.hook || "";
+  const caption = item?.display_caption || item?.summary || "";
+  return [hook && `## Hook\n${hook}`, caption && `## Caption\n${caption}`]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+const POST_STATUSES = [
+  { id: "ai_generated", label: "AI generated", tone: "ai" },
+  { id: "scheduled", label: "Scheduled", tone: "scheduled" },
+  { id: "paused", label: "Needs review / paused", tone: "review" },
+  { id: "posted", label: "Published", tone: "published" },
+  { id: "skipped", label: "Won't post", tone: "failed" },
+];
+
+function normalizePostStatus(status) {
+  const raw = String(status || "pending").toLowerCase().replace(/[\s'-]+/g, "_");
+  if (["skipped", "wont_post", "cancelled", "canceled"].includes(raw)) return "skipped";
+  if (["posted", "published"].includes(raw)) return "posted";
+  if (["paused", "review", "needs_review", "needs_review_paused"].includes(raw)) return "paused";
+  if (["ai_generated", "generated", "draft"].includes(raw)) return "ai_generated";
+  return "scheduled";
+}
+
+function postStatusMeta(status) {
+  const id = normalizePostStatus(status);
+  return POST_STATUSES.find((row) => row.id === id) || POST_STATUSES[1];
+}
+
+function StatusSelect({ value, disabled, compact = false, onChange }) {
+  const current = normalizePostStatus(value);
+  const meta = postStatusMeta(current);
+  return (
+    <label className={`status-select ${compact ? "compact" : ""} is-${meta.tone}`}>
+      {compact ? null : <span>Status</span>}
+      <select
+        aria-label="Post status"
+        value={current}
+        disabled={disabled}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (next !== current) onChange?.(next);
+        }}
+      >
+        {POST_STATUSES.map((row) => (
+          <option key={row.id} value={row.id}>{row.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 const CONNECT_PLATFORMS = ["youtube", "instagram", "linkedin", "twitter"];
 
 function HomePage({ currentJob }) {
@@ -271,7 +374,7 @@ function HomePage({ currentJob }) {
             <button className="home-card" onClick={() => navigate("/calendar")}>
               <CalendarDays size={18} />
               <strong>Content calendar</strong>
-              <p>Pause a platform or skip a day.</p>
+              <p>Pause a platform or any date.</p>
             </button>
             <button className="home-card" onClick={() => navigate("/accounts")}>
               <Link2 size={18} />
@@ -476,6 +579,17 @@ function ConnectPage({ accounts, refreshAccounts, accountBusy }) {
   );
 }
 
+function isYoutubeDownloadBlock(error) {
+  const text = String(error || "").toLowerCase();
+  return (
+    text.includes("youtube blocked") ||
+    text.includes("po token") ||
+    text.includes("http error 403") ||
+    text.includes("403 forbidden") ||
+    text.includes("not a bot")
+  );
+}
+
 function Field({ label, hint, children, wide }) {
   return (
     <label className={`field ${wide ? "wide" : ""}`}>
@@ -534,7 +648,7 @@ function CampaignPage({ campaign, setCampaign }) {
         </div>
 
         {campaign.sourceType === "url" ? (
-          <Field label="Podcast or YouTube URL" hint="Any public episode or video link." wide>
+          <Field label="Podcast or YouTube URL" hint="Paste a public episode or video link. If YouTube blocks the download, switch to Upload video." wide>
             <div className="input-with-icon"><Link2 size={18} /><input value={campaign.source} onChange={(e) => update("source", e.target.value)} placeholder="https://youtube.com/watch?v=…" /></div>
           </Field>
         ) : (
@@ -716,20 +830,82 @@ function formatRemaining(status) {
   return `About ${Math.ceil(leftover / 60)} min`;
 }
 
-function CalendarMonth({ calendar, holds = {}, onHold, onResume, onSkip, onSelect }) {
+function shiftYearMonth(year, month, delta) {
+  const next = new Date(year, month - 1 + delta, 1);
+  return { year: next.getFullYear(), month: next.getMonth() + 1 };
+}
+
+function CalendarMonth({ calendar, holds = {}, onHold, onResume, onPause, onResumeItem, onSkip, onStatus, onSelect }) {
   const [selected, setSelected] = useState(null);
-  if (!calendar?.cells?.length) return null;
-  const chosen = calendar.cells.find((cell) => cell.date === selected) || null;
-  const legend = calendar.legend || Object.entries(CALENDAR_PLATFORMS).map(([id, meta]) => ({ id, ...meta }));
+  const [view, setView] = useState(calendar);
+  const [monthBusy, setMonthBusy] = useState(false);
+  useEffect(() => {
+    setView((prev) => {
+      if (
+        prev?.year &&
+        prev?.month &&
+        calendar?.year &&
+        calendar?.month &&
+        (prev.year !== calendar.year || prev.month !== calendar.month)
+      ) {
+        return prev;
+      }
+      return calendar;
+    });
+  }, [calendar]);
+  const shown = view || calendar;
+  if (!shown?.cells?.length) return null;
+  const chosen = shown.cells.find((cell) => cell.date === selected) || null;
+  const legend = shown.legend || Object.entries(CALENDAR_PLATFORMS).map(([id, meta]) => ({ id, ...meta }));
+  const stayOnMonth = async () => {
+    if (!shown.year || !shown.month) return;
+    try {
+      const data = await creatorApi.calendar(shown.year, shown.month);
+      setView(data.calendar);
+    } catch (err) {
+      console.warn(err);
+    }
+  };
+  const goMonth = async (delta) => {
+    if (!shown.year || !shown.month) return;
+    const next = shiftYearMonth(shown.year, shown.month, delta);
+    setMonthBusy(true);
+    try {
+      const data = await creatorApi.calendar(next.year, next.month);
+      setView(data.calendar);
+      setSelected(null);
+    } catch (err) {
+      console.warn(err);
+    } finally {
+      setMonthBusy(false);
+    }
+  };
+  const runStay = async (fn) => {
+    setMonthBusy(true);
+    try {
+      await fn?.(shown.year, shown.month);
+      await stayOnMonth();
+    } finally {
+      setMonthBusy(false);
+    }
+  };
 
   return (
     <section className="panel calendar-panel" id="calendar">
       <div className="section-heading">
         <div>
           <span className="overline">Content calendar</span>
-          <h2>{calendar.label}</h2>
+          <div className="calendar-month-nav">
+            <button type="button" className="icon-button" onClick={() => goMonth(-1)} disabled={monthBusy} aria-label="Previous month">
+              <ArrowLeft size={16} />
+            </button>
+            <h2>{shown.label}</h2>
+            <button type="button" className="icon-button" onClick={() => goMonth(1)} disabled={monthBusy} aria-label="Next month">
+              <ArrowRight size={16} />
+            </button>
+          </div>
         </div>
-        <span>{calendar.blocked_days} days booked · {calendar.total_posts} posts</span>
+        <span>{shown.blocked_days} days booked · {shown.total_posts} posts{monthBusy ? " · loading" : ""}</span>
       </div>
       <div className="calendar-legend">
         {legend.map((item) => {
@@ -739,8 +915,8 @@ function CalendarMonth({ calendar, holds = {}, onHold, onResume, onSkip, onSelec
               type="button"
               className={`cal-chip ${held ? "held" : ""}`}
               key={item.id || item.short}
-              onClick={() => (held ? onResume?.(item.id) : onHold?.(item.id))}
-              title={held ? `Resume ${item.label}` : `Pause ${item.label} for the rest of the month`}
+              onClick={() => runStay((year, month) => (held ? onResume?.(item.id, year, month) : onHold?.(item.id, year, month)))}
+              title={held ? `Resume every ${item.label} date` : `Pause every ${item.label} date — any month`}
             >
               <BrandIcon platform={item.id} size={16} label={item.label} />
               {item.label}
@@ -749,7 +925,7 @@ function CalendarMonth({ calendar, holds = {}, onHold, onResume, onSkip, onSelec
           );
         })}
       </div>
-      <p className="calendar-hint">Tap a platform chip to pause every remaining post on that channel. The videos stay in your library.</p>
+      <p className="calendar-hint">Open any month. Tap a platform to pause every date, or change a post’s status in the library or on a day — schedule it, hold it, or mark it as won’t post.</p>
       <div className="calendar-legend status-legend">
         <span className="cal-status is-ai">AI generated</span>
         <span className="cal-status is-scheduled">Scheduled</span>
@@ -758,12 +934,12 @@ function CalendarMonth({ calendar, holds = {}, onHold, onResume, onSkip, onSelec
         <span className="cal-status is-failed">Won't post</span>
       </div>
       <div className="calendar-weekdays">
-        {(calendar.weekdays || ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]).map((day) => (
+        {(shown.weekdays || ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]).map((day) => (
           <span key={day}>{day}</span>
         ))}
       </div>
       <div className="calendar-grid">
-        {calendar.cells.map((cell, index) => (
+        {shown.cells.map((cell, index) => (
           <button
             type="button"
             key={cell.date || `empty-${index}`}
@@ -775,13 +951,22 @@ function CalendarMonth({ calendar, holds = {}, onHold, onResume, onSkip, onSelec
             }}
           >
             <strong>{cell.day || ""}</strong>
-            {cell.blocked && (
+            {Boolean(cell.items?.length) && (
               <div className="calendar-markers">
-                {(cell.platforms || []).slice(0, 4).map((marker, markerIndex) => (
-                  <span className={`cal-dot ${holds[marker.id] ? "held" : ""}`} key={`${cell.date}-${marker.id}-${markerIndex}`} title={marker.label}>
-                    <BrandIcon platform={marker.id} size={18} label={marker.label} />
-                  </span>
-                ))}
+                {cell.items.slice(0, 4).map((row, markerIndex) => {
+                  const marker = row.marker || {};
+                  const meta = postStatusMeta(row.status);
+                  const dimmed = holds[marker.id] || meta.id === "paused" || meta.id === "skipped";
+                  return (
+                    <span
+                      className={`cal-dot ${dimmed ? "held" : ""} is-${meta.tone}`}
+                      key={`${cell.date}-${row.id || marker.id}-${markerIndex}`}
+                      title={`${marker.label}: ${meta.label}`}
+                    >
+                      <BrandIcon platform={marker.id} size={18} label={marker.label} />
+                    </span>
+                  );
+                })}
               </div>
             )}
           </button>
@@ -790,21 +975,49 @@ function CalendarMonth({ calendar, holds = {}, onHold, onResume, onSkip, onSelec
       {chosen?.items?.length > 0 && (
         <div className="calendar-day-detail">
           <strong>{chosen.date}</strong>
-          {chosen.items.map((item) => (
-            <div key={item.id}>
-              <span className={`cal-chip ${item.status === "paused" || item.status === "skipped" || holds[item.platform] ? "held" : ""}`}>
-                <BrandIcon platform={item.marker?.id || item.platform} size={16} label={item.marker?.label} />
-                {item.marker?.label}
-              </span>
-              <em>{item.hook || "Scheduled post"}</em>
-              <span className={`cal-status is-${item.status === "skipped" ? "failed" : item.status === "paused" || holds[item.platform] ? "review" : item.status === "posted" ? "published" : "scheduled"}`}>
-                {item.status === "skipped" ? "Won't post" : item.status === "paused" || holds[item.platform] ? "Paused" : item.status === "posted" ? "Published" : "Scheduled"}
-              </span>
-              {item.status !== "posted" && item.status !== "skipped" && onSkip && (
-                <button type="button" className="text-button" onClick={() => onSkip(item.id)}>Skip</button>
-              )}
-            </div>
-          ))}
+          {chosen.items.map((item) => {
+            const meta = postStatusMeta(item.status);
+            const held = meta.id === "paused" || meta.id === "skipped";
+            return (
+              <div key={item.id}>
+                <span className={`cal-chip ${held ? "held" : ""}`}>
+                  <BrandIcon platform={item.marker?.id || item.platform} size={16} label={item.marker?.label} />
+                  {item.marker?.label}
+                </span>
+                <em>{item.hook || "Scheduled post"}</em>
+                {onStatus ? (
+                  <StatusSelect
+                    compact
+                    value={item.status}
+                    disabled={monthBusy}
+                    onChange={(status) => runStay((year, month) => onStatus(item.id, status, year, month))}
+                  />
+                ) : (
+                  <>
+                    <span className={`cal-status is-${meta.tone}`}>{meta.label}</span>
+                    {meta.id !== "posted" && (
+                      <div className="calendar-day-actions">
+                        {held && meta.id === "paused" ? (
+                          <button type="button" className="text-button" onClick={() => runStay((year, month) => onResumeItem?.(item.id, year, month))}>
+                            Resume
+                          </button>
+                        ) : meta.id !== "skipped" ? (
+                          <button type="button" className="text-button" onClick={() => runStay((year, month) => onPause?.(item.id, year, month))}>
+                            Pause
+                          </button>
+                        ) : null}
+                        {meta.id !== "skipped" && onSkip && (
+                          <button type="button" className="text-button" onClick={() => runStay((year, month) => onSkip(item.id, year, month))}>
+                            Skip
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </section>
@@ -911,6 +1124,7 @@ function ProcessingPage({ currentJob, onComplete, plan, setPlan }) {
   const progress = status?.progress_percent || 0;
   const backendSteps = status?.steps || [];
   const activeStep = PROCESSING_STEPS[Math.max((status?.step_index || 1) - 1, 0)];
+  const youtubeBlocked = isYoutubeDownloadBlock(status?.error);
 
   return (
     <AppShell step="processing">
@@ -954,9 +1168,24 @@ function ProcessingPage({ currentJob, onComplete, plan, setPlan }) {
             <div><strong>{progress}%</strong><span>complete</span></div>
           </div>
           <div className="progress-copy">
-            <span className="overline">creatorOS is thinking</span>
-            <h2>{status?.step_label || activeStep?.label || "Analyzing your podcast"}</h2>
-            <p>{activeStep?.description || "Identifying moments, then building your month of content."}</p>
+            <div className="processing-brand">
+              <BrandMark size={36} />
+              <span className="overline">creatorOS is thinking</span>
+            </div>
+            <h2>
+              {status?.status === "failed"
+                ? youtubeBlocked
+                  ? "YouTube blocked the download"
+                  : "This run stopped"
+                : status?.step_label || activeStep?.label || "Analyzing your podcast"}
+            </h2>
+            <p>
+              {status?.status === "failed"
+                ? youtubeBlocked
+                  ? "This is YouTube anti-bot, not a bad URL. Try Again — paste-a-link does not require a signed-in browser. Upload the MP4 if YouTube keeps blocking this network."
+                  : status?.error || "The campaign stopped unexpectedly."
+                : activeStep?.description || "Identifying moments, then building your month of content."}
+            </p>
             <div className="progress-track"><span style={{ width: `${progress}%` }} /></div>
             <div className="progress-meta">
               <span><Clock3 size={15} /> Elapsed: {status?.elapsed_human || "0s"}</span>
@@ -965,6 +1194,16 @@ function ProcessingPage({ currentJob, onComplete, plan, setPlan }) {
           </div>
         </div>
         {status?.status === "failed" && <Notice>{status.error || "The campaign stopped unexpectedly."}</Notice>}
+        {status?.status === "failed" && (
+          <div className="page-actions" style={{ marginTop: 4 }}>
+            <button
+              className="primary-button"
+              onClick={() => navigate("/campaign")}
+            >
+              <Upload size={16} /> Upload the video file instead
+            </button>
+          </div>
+        )}
         {status?.status === "stopped" && <Notice>{status.message || "The run was stopped. Anything already cut is in the campaign library."}</Notice>}
         {stopNote && <Notice>{stopNote}</Notice>}
         {pollError && <Notice>Connection interrupted: {pollError}. Retrying automatically…</Notice>}
@@ -1067,19 +1306,52 @@ function CompletionPage({ currentJob }) {
     loadBoard();
   }, []);
 
-  const applyHold = async (platform, resume = false) => {
+  const applyHold = async (platform, resume = false, year, month) => {
     try {
       resume
-        ? await creatorApi.resumePlatform(platform)
-        : await creatorApi.holdPlatform(platform);
+        ? await creatorApi.resumePlatform(platform, year, month)
+        : await creatorApi.holdPlatform(platform, year, month);
       await loadBoard();
     } catch (err) {
       setError(err.message);
     }
   };
-  const skipItem = async (itemId) => {
+  const skipItem = async (itemId, year, month) => {
     try {
-      await creatorApi.skipPost(itemId);
+      await creatorApi.skipPost(itemId, year, month);
+      await loadBoard();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  const pauseItem = async (itemId, year, month) => {
+    try {
+      await creatorApi.pausePost(itemId, year, month);
+      await loadBoard();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  const resumeItem = async (itemId, year, month) => {
+    try {
+      await creatorApi.resumePost(itemId, year, month);
+      await loadBoard();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  const setItemStatus = async (itemId, status, year, month) => {
+    try {
+      const data = await creatorApi.setPostStatus(itemId, status, year, month);
+      setBoard((prev) => ({
+        ...(prev || {}),
+        items: (prev?.items || []).map((item) =>
+          item.id === itemId ? { ...item, status: data.status || status } : item
+        ),
+        calendar: data.calendar || prev?.calendar,
+        holds: data.holds || prev?.holds,
+      }));
+      setHolds(data.holds || {});
       await loadBoard();
     } catch (err) {
       setError(err.message);
@@ -1102,7 +1374,7 @@ function CompletionPage({ currentJob }) {
           <div className="eyebrow">Campaign complete</div>
           <h1>Your content engine is ready</h1>
           <p>
-            Everything is generated and dated. Pause Instagram, YouTube, LinkedIn, or X
+            Everything is generated and dated. Pause a platform or a single date
             any time this month — the rest of the campaign keeps moving.
           </p>
         </div>
@@ -1126,9 +1398,12 @@ function CompletionPage({ currentJob }) {
       <CalendarMonth
         calendar={board?.calendar}
         holds={holds}
-        onHold={(platform) => applyHold(platform, false)}
-        onResume={(platform) => applyHold(platform, true)}
+        onHold={(platform, year, month) => applyHold(platform, false, year, month)}
+        onResume={(platform, year, month) => applyHold(platform, true, year, month)}
+        onPause={pauseItem}
+        onResumeItem={resumeItem}
         onSkip={skipItem}
+        onStatus={setItemStatus}
       />
 
       <div className="completion-kpis">
@@ -1205,7 +1480,8 @@ function CompletionPage({ currentJob }) {
             <div className="summary-title"><Pause size={18} /><span>Posting control</span></div>
             <strong>{Object.values(holds).filter(Boolean).length} platforms paused</strong>
             <p>
-              Generated clips stay in the library. Paused channels skip their dates until you turn them back on.
+              Generated clips stay in the library. Pause a channel or any date
+              — turn it back on whenever you want.
             </p>
           </section>
         </aside>
@@ -1240,7 +1516,9 @@ function ResultsPage({ currentJob }) {
   const [board, setBoard] = useState(null);
   const [error, setError] = useState("");
   const [activePlatform, setActivePlatform] = useState("all");
+  const [deckPlatform, setDeckPlatform] = useState("");
   const [holds, setHolds] = useState({});
+  const [statusBusy, setStatusBusy] = useState("");
 
   const loadBoard = () =>
     creatorApi.board().then((data) => {
@@ -1252,22 +1530,59 @@ function ResultsPage({ currentJob }) {
     loadBoard();
   }, []);
 
-  const applyHold = async (platform, resume = false) => {
+  const applyHold = async (platform, resume = false, year, month) => {
     try {
       resume
-        ? await creatorApi.resumePlatform(platform)
-        : await creatorApi.holdPlatform(platform);
+        ? await creatorApi.resumePlatform(platform, year, month)
+        : await creatorApi.holdPlatform(platform, year, month);
       await loadBoard();
     } catch (err) {
       setError(err.message);
     }
   };
-  const skipItem = async (itemId) => {
+  const skipItem = async (itemId, year, month) => {
     try {
-      await creatorApi.skipPost(itemId);
+      await creatorApi.skipPost(itemId, year, month);
       await loadBoard();
     } catch (err) {
       setError(err.message);
+    }
+  };
+  const pauseItem = async (itemId, year, month) => {
+    try {
+      await creatorApi.pausePost(itemId, year, month);
+      await loadBoard();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  const resumeItem = async (itemId, year, month) => {
+    try {
+      await creatorApi.resumePost(itemId, year, month);
+      await loadBoard();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+  const setItemStatus = async (itemId, status, year, month) => {
+    setStatusBusy(itemId);
+    try {
+      const data = await creatorApi.setPostStatus(itemId, status, year, month);
+      setBoard((prev) => ({
+        ...(prev || {}),
+        items: (prev?.items || []).map((item) =>
+          item.id === itemId ? { ...item, status: data.status || status } : item
+        ),
+        calendar: data.calendar || prev?.calendar,
+        holds: data.holds || prev?.holds,
+      }));
+      setHolds(data.holds || {});
+      await loadBoard();
+      setError("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setStatusBusy("");
     }
   };
 
@@ -1275,13 +1590,16 @@ function ResultsPage({ currentJob }) {
   const platforms = [...new Set(items.map((item) => item.assigned_platform).filter(Boolean))];
   const visible = activePlatform === "all" ? items : items.filter((item) => item.assigned_platform === activePlatform);
   const summary = board?.summary || {};
+  const decks = board?.campaign_posts || {};
+  const deckKeys = Object.keys(decks);
+  const currentDeck = deckKeys.includes(deckPlatform) ? deckPlatform : deckKeys[0];
 
   return (
     <AppShell flow={false}>
       <PageHeading
         eyebrow="Library"
         title="Your campaign assets"
-        description="Preview the edits, pause a platform, or download the package."
+        description="Preview the 9:16 cuts, copy the markdown, and set each post to scheduled, paused, or won’t post."
         aside={
           <div className="heading-actions">
             <button
@@ -1323,28 +1641,51 @@ function ResultsPage({ currentJob }) {
         <div className="loading-state"><LoaderCircle className="spin" /><span>Loading campaign assets…</span></div>
       ) : (
         <>
-          <CalendarMonth
-            calendar={board.calendar}
-            holds={holds}
-            onHold={(platform) => applyHold(platform, false)}
-            onResume={(platform) => applyHold(platform, true)}
-            onSkip={skipItem}
-          />
+          <div className="library-status-intro">
+            <p className="asset-copy-hint">
+              Same statuses as the calendar. On each clip, choose whether it should actually post, wait, or not go out.
+            </p>
+            <div className="calendar-legend status-legend">
+              {POST_STATUSES.map((row) => (
+                <span className={`cal-status is-${row.tone}`} key={row.id}>{row.label}</span>
+              ))}
+            </div>
+          </div>
           <div className="asset-grid">
           {visible.map((item, index) => (
             <article className="asset-card" key={item.id || `${item.assigned_platform}-${index}`}>
-              {item.play_url ? (
-                <video controls preload="metadata" src={apiUrl(item.play_url)} />
-              ) : (
-                <div className="asset-placeholder"><Film size={28} /><span>{item.assigned_platform?.replaceAll("_", " ")}</span></div>
-              )}
-              <div className="asset-body">
+              <div className="asset-card-top">
                 <div className="asset-meta">
                   <span>{item.package_label || "Platform cut"}</span>
-                  <strong>{item.status === "paused" || holds[item.assigned_platform] ? "Paused" : item.status === "skipped" ? "Skipped" : item.scheduled_date || "Queued"}</strong>
+                  <span>{item.scheduled_date || "Queued"}</span>
                 </div>
+                <div className="asset-status-row">
+                  <StatusSelect
+                    value={item.status}
+                    disabled={!item.id || statusBusy === item.id}
+                    onChange={(status) => setItemStatus(item.id, status)}
+                  />
+                </div>
+              </div>
+              {item.play_url ? (
+                <div className="asset-video">
+                  <video controls preload="metadata" src={apiUrl(item.play_url)} />
+                </div>
+              ) : (
+                <div className="asset-placeholder"><FileText size={28} /><span>{item.assigned_platform?.replaceAll("_", " ")}</span></div>
+              )}
+              <div className="asset-body">
                 <h3>{item.display_hook || item.hook || "Untitled asset"}</h3>
-                <p>{item.display_caption || item.summary || "Campaign copy is ready for review."}</p>
+                <p className="asset-caption">{item.display_caption || item.summary || "Campaign copy is ready for review."}</p>
+                {item.post_markdown ? <pre className="post-markdown compact">{item.post_markdown}</pre> : null}
+                <p className="asset-copy-hint">
+                  Hook is the opening line. Caption is the body you paste. Copy post takes the full markdown file.
+                </p>
+                <div className="asset-copy-row">
+                  <CopyButton text={item.display_hook || item.hook} label="Copy hook" />
+                  <CopyButton text={item.display_caption || item.summary} label="Copy caption" />
+                  <CopyButton text={itemPostText(item)} label="Copy post" />
+                </div>
                 <div className="asset-foot">
                   <span className="cal-chip">
                     <BrandIcon platform={item.assigned_platform} size={14} label={item.assigned_platform} />
@@ -1356,6 +1697,42 @@ function ResultsPage({ currentJob }) {
             </article>
           ))}
           </div>
+          {deckKeys.length > 0 && (
+              <section className="panel posts-deck">
+                <div className="section-heading">
+                  <div>
+                    <span className="overline">Campaign posts</span>
+                    <h2>Copy the markdown from this run</h2>
+                  </div>
+                  <CopyButton text={decks[currentDeck]} label="Copy platform posts" />
+                </div>
+                <p className="asset-copy-hint">
+                  Each clip has a hook (first line), a caption (the rest of the post), and a full markdown file you can paste into LinkedIn, X, or YouTube.
+                </p>
+                <div className="platform-tabs posts-deck-tabs">
+                  {deckKeys.map((platform) => (
+                    <button
+                      key={platform}
+                      className={currentDeck === platform ? "active" : ""}
+                      onClick={() => setDeckPlatform(platform)}
+                    >
+                      {platform.replaceAll("_", " ")}
+                    </button>
+                  ))}
+                </div>
+                <pre className="post-markdown">{decks[currentDeck]}</pre>
+              </section>
+          )}
+          <CalendarMonth
+            calendar={board.calendar}
+            holds={holds}
+            onHold={(platform, year, month) => applyHold(platform, false, year, month)}
+            onResume={(platform, year, month) => applyHold(platform, true, year, month)}
+            onPause={pauseItem}
+            onResumeItem={resumeItem}
+            onSkip={skipItem}
+            onStatus={setItemStatus}
+          />
         </>
       )}
     </AppShell>
@@ -1393,7 +1770,7 @@ function CalendarStudio() {
       <PageHeading
         eyebrow="Posting"
         title="This month, on your terms"
-        description="Clips are already made. Pause a whole platform or skip a single date — nothing is deleted."
+        description="Clips are already made. Pause a whole platform or any single date — nothing is deleted, and you can resume anytime."
         aside={busy ? <LoaderCircle className="spin" size={18} /> : null}
       />
       {error && <Notice>{error}</Notice>}
@@ -1401,9 +1778,12 @@ function CalendarStudio() {
         <CalendarMonth
           calendar={payload.calendar}
           holds={holds}
-          onHold={(platform) => run(() => creatorApi.holdPlatform(platform), platform)}
-          onResume={(platform) => run(() => creatorApi.resumePlatform(platform), platform)}
-          onSkip={(itemId) => run(() => creatorApi.skipPost(itemId), itemId)}
+          onHold={(platform, year, month) => run(() => creatorApi.holdPlatform(platform, year, month), platform)}
+          onResume={(platform, year, month) => run(() => creatorApi.resumePlatform(platform, year, month), platform)}
+          onPause={(itemId, year, month) => run(() => creatorApi.pausePost(itemId, year, month), itemId)}
+          onResumeItem={(itemId, year, month) => run(() => creatorApi.resumePost(itemId, year, month), itemId)}
+          onSkip={(itemId, year, month) => run(() => creatorApi.skipPost(itemId, year, month), itemId)}
+          onStatus={(itemId, status, year, month) => run(() => creatorApi.setPostStatus(itemId, status, year, month), itemId)}
         />
       ) : (
         <div className="loading-state">
@@ -1529,7 +1909,7 @@ function NextStepGuide({ name, onStay, onSkip }) {
         <button className="icon-button guide-close" onClick={onStay} aria-label="Close">
           <X size={16} />
         </button>
-        <div className="guide-spark"><Sparkles size={18} /></div>
+        <div className="guide-spark"><BrandMark size={42} /></div>
         <h3 id="guide-title">Hey {name} — here's what to do next</h3>
         <p>You're on Accounts. Three steps, then you have a month of content.</p>
         <ol className="guide-steps">
@@ -1569,6 +1949,17 @@ function AuthScreen() {
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [googleReady, setGoogleReady] = useState(Boolean(auth.cloud));
+
+  useEffect(() => {
+    if (auth.cloud) {
+      setGoogleReady(true);
+      return;
+    }
+    creatorApi.authConfig()
+      .then((data) => setGoogleReady(Boolean(data.google_signin || data.google_client_id)))
+      .catch(() => setGoogleReady(false));
+  }, [auth.cloud]);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -1605,6 +1996,7 @@ function AuthScreen() {
       const { error } = await auth.signInWithGoogle();
       if (error) throw error;
       sessionStorage.setItem("creatoros.fresh-session", "1");
+      if (!auth.cloud) navigate("/accounts", { replace: true });
     } catch (error) {
       setMessage(error.message);
       setBusy(false);
@@ -1637,7 +2029,7 @@ function AuthScreen() {
       </div>
       <div className="auth-panel">
         <form onSubmit={submit}>
-          <div className="auth-icon"><Sparkles size={22} /></div>
+          <div className="auth-icon"><BrandMark size={48} /></div>
           <h2>{mode === "signup" ? "Create your workspace" : mode === "reset" ? "Reset your password" : "Welcome back."}</h2>
           <p>
             {mode === "signup"
@@ -1646,7 +2038,7 @@ function AuthScreen() {
                 ? "We’ll email you a reset link."
                 : "Continue to your studio."}
           </p>
-          {mode === "signin" && (
+          {mode === "signin" && googleReady && (
             <>
               <button type="button" className="google-button" disabled={busy} onClick={googleSignIn}>
                 <GoogleMark /> Continue with Google
@@ -1732,7 +2124,7 @@ function CreatorApp() {
     }
   };
 
-  if (auth.loading) return <div className="app-loading"><div className="brand-mark"><img src={LOGO_URL} alt="CreatorOS" /></div><LoaderCircle className="spin" /></div>;
+  if (auth.loading) return <div className="app-loading"><BrandMark /><LoaderCircle className="spin" /></div>;
   if (!auth.user) return <AuthScreen />;
 
   const oauthResult = ["youtube", "instagram", "linkedin", "twitter"].some((key) =>

@@ -84,10 +84,17 @@ export const creatorApi = {
     const query = year && month ? `?year=${year}&month=${month}` : "";
     return apiFetch(`/campaign-calendar${query}`);
   },
-  holdPlatform: (platform) =>
-    apiFetch("/schedule/hold", { method: "POST", body: JSON.stringify({ platform }) }),
-  resumePlatform: (platform) =>
-    apiFetch("/schedule/resume", { method: "POST", body: JSON.stringify({ platform }) }),
-  skipPost: (itemId) =>
-    apiFetch(`/schedule/skip/${itemId}`, { method: "POST" }),
+  holdPlatform: (platform, year, month) =>
+    apiFetch("/schedule/hold", { method: "POST", body: JSON.stringify({ platform, year, month }) }),
+  resumePlatform: (platform, year, month) =>
+    apiFetch("/schedule/resume", { method: "POST", body: JSON.stringify({ platform, year, month }) }),
+  skipPost: (itemId, year, month) =>
+    apiFetch(`/schedule/skip/${itemId}`, { method: "POST", body: JSON.stringify({ year, month }) }),
+  pausePost: (itemId, year, month) =>
+    apiFetch(`/schedule/pause/${itemId}`, { method: "POST", body: JSON.stringify({ year, month }) }),
+  resumePost: (itemId, year, month) =>
+    apiFetch(`/schedule/resume-item/${itemId}`, { method: "POST", body: JSON.stringify({ year, month }) }),
+  setPostStatus: (itemId, status, year, month) =>
+    apiFetch(`/schedule/status/${itemId}`, { method: "POST", body: JSON.stringify({ status, year, month }) }),
+  authConfig: () => apiFetch("/auth/config"),
 };

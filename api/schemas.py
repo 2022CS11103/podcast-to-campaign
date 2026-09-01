@@ -108,6 +108,15 @@ class ScheduleControlRequest(BaseModel):
     platform: Optional[str] = None
     item_id: Optional[str] = None
     hold: Optional[bool] = None
+    year: Optional[int] = None
+    month: Optional[int] = None
+
+
+class ScheduleStatusRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    status: str
+    year: Optional[int] = None
+    month: Optional[int] = None
 
 
 class YouTubeUploadRequest(BaseModel):

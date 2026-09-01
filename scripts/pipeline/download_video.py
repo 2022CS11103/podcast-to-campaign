@@ -12,7 +12,7 @@ SIDECAR_PY = PROJECT_ROOT / ".tools" / "ytdlp" / "bin" / "python"
 
 
 def _bootstrap_ytdlp_sidecar() -> None:
-    """Current yt-dlp needs Python 3.10+. The app venv is still 3.9."""
+    """Current yt-dlp needs Python 3.10+. The app venv may still be 3.9."""
     if SIDECAR_PY.exists():
         return
     py = (
@@ -290,10 +290,8 @@ def _bot_help(url: str, tried: list[str], locked_cookies: bool = False, forbidde
         "YouTube blocked this download (bot check).\n"
         f"Watch URL: {url}\n"
         f"Tried: {tried_txt}\n"
-        "Fastest fix: open Firefox, log into youtube.com, then Try Again. "
-        "Keep Firefox open. Chrome/Edge can stay open.\n"
-        "Chrome/Edge cookies cannot be used on Windows while those browsers are running.\n"
-        "Or save a Netscape cookies.txt in the project folder."
+        "Paste-a-link does not require a signed-in browser. Try Again in a moment, "
+        "or upload the MP4 if YouTube keeps challenging this network."
     )
 
 

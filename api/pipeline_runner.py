@@ -40,10 +40,9 @@ def _public_error(exc: Exception) -> str:
         if marker in text:
             return text[text.rfind(marker):].strip()[:1200]
         return (
-            "YouTube blocked the download (bot check). "
-            "Open Firefox, log into youtube.com, then Try Again. "
-            "Keep Firefox open — Chrome/Edge can stay open. "
-            "Chrome/Edge cookies cannot be read on Windows while those browsers are running."
+            "YouTube blocked the download. "
+            "Try Again — paste-a-link does not require a signed-in browser. "
+            "If YouTube keeps challenging this network, upload the MP4 instead."
         )
     return text
 
