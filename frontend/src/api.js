@@ -61,6 +61,15 @@ export const creatorApi = {
     body.append("file", file);
     return apiFetch("/uploads/video", { method: "POST", body });
   },
+  getBrand: () => apiFetch("/brand"),
+  saveBrand: (payload) =>
+    apiFetch("/brand", { method: "PUT", body: JSON.stringify(payload) }),
+  uploadLogo: (file) => {
+    const body = new FormData();
+    body.append("file", file);
+    return apiFetch("/uploads/logo", { method: "POST", body });
+  },
+  clearLogo: () => apiFetch("/brand/logo", { method: "DELETE" }),
   uploadYouTube: (itemId) =>
     apiFetch("/youtube/upload", {
       method: "POST",

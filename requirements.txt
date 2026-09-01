@@ -11,6 +11,7 @@ google-auth-oauthlib
 cryptography
 faster-whisper
 opencv-python
+pillow
 ultralytics<8.4
 
 # NEW

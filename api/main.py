@@ -24,6 +24,7 @@ from api.schemas import (
     ScopeJobRequest,
     ScheduleControlRequest,
     ScheduleStatusRequest,
+    BrandUpdateRequest,
 )
 from api.job_manager import job_manager
 from api.pipeline_runner import start_worker, enqueue_job
@@ -40,6 +41,14 @@ from utils.pipeline_timer import format_duration, snapshot as timing_snapshot
 from utils.pipeline_steps import describe_step
 from utils.campaign_calendar import from_bank as calendar_from_bank
 from utils.content_plan import normalize_plan, load_plan, save_plan
+from utils.brand_settings import (
+    BRAND_DIR,
+    load_brand,
+    merge_and_save,
+    public_brand,
+    resolve_logo_path,
+    save_brand,
+)
 from utils.social_oauth import (
     all_statuses as social_account_statuses,
     authorization_url as social_authorization_url,
@@ -103,6 +112,8 @@ PUBLIC_FRONTEND_URL = os.getenv(
 CONTENT_BANK = PROJECT_ROOT / "output" / "content_bank.json"
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 UPLOAD_DIR = PROJECT_ROOT / "input" / "uploads"
+LOGO_MAX_BYTES = 8 * 1024 * 1024
+LOGO_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
 MEDIA_FOLDERS = {
     "final_shorts", "youtube_shorts", "instagram_reels", "tiktok", "posts",
 }
@@ -210,6 +221,93 @@ async def upload_source_video(file: UploadFile = File(...)):
         "path": str(destination.resolve()),
         "filename": file.filename,
         "size_bytes": total,
+    }
+
+
+def _logo_media_type(path: Path) -> str:
+    return {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }.get(path.suffix.lower(), "application/octet-stream")
+
+
+@app.get("/brand")
+def get_brand():
+    return public_brand()
+
+
+@app.put("/brand")
+def update_brand(req: BrandUpdateRequest):
+    incoming = req.model_dump(exclude_none=True) if hasattr(req, "model_dump") else req.dict(exclude_none=True)
+    extras = getattr(req, "model_extra", None) or {}
+    incoming.update({k: v for k, v in extras.items() if v is not None})
+    if incoming.get("end_screen_enabled") and not str(incoming.get("brand_name") or load_brand().get("brand_name") or "").strip():
+        raise HTTPException(status_code=400, detail="Brand name is required for the end screen.")
+    if "logo_path" in incoming and incoming.get("logo_path") in ("", None):
+        current = load_brand()
+        current["logo_path"] = ""
+        current.update({k: v for k, v in incoming.items() if k != "logo_path"})
+        return public_brand(save_brand(current))
+    return public_brand(merge_and_save(incoming))
+
+
+@app.get("/brand/logo")
+def get_brand_logo():
+    path = resolve_logo_path(load_brand().get("logo_path"))
+    if path is None:
+        raise HTTPException(status_code=404, detail="No brand logo uploaded.")
+    return FileResponse(path, media_type=_logo_media_type(path), filename=path.name)
+
+
+@app.delete("/brand/logo")
+def clear_brand_logo():
+    current = load_brand()
+    old = resolve_logo_path(current.get("logo_path"))
+    current["logo_path"] = ""
+    saved = save_brand(current)
+    if old and old.exists() and old.parent == BRAND_DIR.resolve():
+        old.unlink(missing_ok=True)
+    return public_brand(saved)
+
+
+@app.post("/uploads/logo")
+async def upload_brand_logo(file: UploadFile = File(...)):
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in LOGO_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail="Upload a PNG, JPG, or WebP logo. Transparent PNG works best.",
+        )
+    BRAND_DIR.mkdir(parents=True, exist_ok=True)
+    destination = BRAND_DIR / f"logo_{uuid.uuid4().hex}{suffix}"
+    total = 0
+    try:
+        with destination.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > LOGO_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="Logo exceeds the 8 MB upload limit.")
+                output.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+
+    previous = resolve_logo_path(load_brand().get("logo_path"))
+    relative = str(destination.relative_to(PROJECT_ROOT)).replace("\\", "/")
+    saved = merge_and_save({"logo_path": relative})
+    if previous and previous.exists() and previous != destination.resolve():
+        if previous.parent.resolve() == BRAND_DIR.resolve():
+            previous.unlink(missing_ok=True)
+    return {
+        "path": relative,
+        "filename": file.filename,
+        "size_bytes": total,
+        "logo_url": "/brand/logo",
+        "brand": public_brand(saved),
     }
 
 

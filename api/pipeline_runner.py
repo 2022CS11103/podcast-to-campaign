@@ -11,6 +11,7 @@ from agents.orchestrator import CreatorOS
 from api.job_manager import job_manager
 from utils.cost_tracker import generate_report, reset_log
 from utils.content_plan import plan_is_usable, normalize_plan
+from utils.brand_settings import merge_and_save
 from utils.pipeline_timer import reset as reset_timer, log_step, finish, snapshot, format_duration
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -89,6 +90,15 @@ def _run_script(script: str):
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"{script} failed:\n{detail[-2500:]}")
+
+
+def _route_and_brand():
+    _run_script("scripts/ai/platform_router.py")
+    try:
+        _run_script("scripts/video/brand_end_screen.py")
+    except Exception as exc:
+        print(f"⚠️  Brand end screen skipped: {exc}")
+        print("   Original generated clips were left unchanged.")
 
 
 def _timed(job_id, name, fn):
@@ -243,7 +253,7 @@ def _wind_down(job_id, stopped: JobStopped, content_plan, done_stages):
     plan = _write_plan(_cap_plan_to_renders(content_plan))
     try:
         if "routing" not in done_stages:
-            _timed(job_id, "routing", lambda: _run_script("scripts/ai/platform_router.py"))
+            _timed(job_id, "routing", _route_and_brand)
         if "marketing" not in done_stages:
             _timed(job_id, "marketing", CreatorOS().marketing.run)
         if "planning" not in done_stages:
@@ -298,9 +308,7 @@ def _worker():
             _wipe_output_dirs(INTERMEDIATE_DIRS)
 
             if brand_context:
-                brand_file = PROJECT_ROOT / "brand_context.json"
-                with open(brand_file, "w", encoding="utf-8") as f:
-                    json.dump(brand_context, f, indent=2)
+                merge_and_save(brand_context)
 
             content_plan = _write_plan(content_plan)
 
@@ -314,7 +322,7 @@ def _worker():
                 ("strategy", lambda: _run_script("scripts/ai/strategy_agent.py")),
                 ("ranking", lambda: _run_script("scripts/ai/clip_ranker.py")),
                 ("editing", creator.editor.run),
-                ("routing", lambda: _run_script("scripts/ai/platform_router.py")),
+                ("routing", _route_and_brand),
                 ("marketing", creator.marketing.run),
                 ("planning", lambda: (
                     _run_script("scripts/ai/campaign_planner.py"),
