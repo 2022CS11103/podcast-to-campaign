@@ -101,8 +101,9 @@ MIN_OVERALL_SCORE = 60
 USABLE_SCORE_FLOOR = 48
 
 # Encode distinct moments for Shorts vs Reels when we can.
-# 2 Shorts + 3 Reels → try 5 unique cuts, cap so a 1-hour talk stays cheap.
-MAX_UNIQUE_RENDERS = 5
+# Cap keeps long talks cheap; still high enough for 5 Shorts + 5 Reels
+# without copying the exact same cut into multiple slots.
+MAX_UNIQUE_RENDERS = 12
 
 # Transcribe/score the talk in slices. Stop as soon as enough
 # unique clips clear MIN_OVERALL_SCORE — no need to parse a full hour.

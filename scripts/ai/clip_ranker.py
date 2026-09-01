@@ -135,7 +135,7 @@ def _energy(clip):
 
 
 def pick_clips(ranked, needed):
-    """Take the best unique moments. Never return empty if anything was scored."""
+    """Take the best moments with distinct start times. Overlap OK; exact dupes not."""
     if not ranked:
         return []
     usable = [
@@ -143,10 +143,9 @@ def pick_clips(ranked, needed):
         if float(c.get("overall_score") or 0) >= USABLE_SCORE_FLOOR
         or _energy(c) >= 72
     ]
-    pool = usable or ranked
     chosen = []
     seen = set()
-    for clip in pool + ranked:
+    for clip in (usable or ranked) + ranked:
         key = (clip.get("chunk_id"), round(float(clip.get("start") or 0), 1))
         if key in seen:
             continue
@@ -156,15 +155,89 @@ def pick_clips(ranked, needed):
             break
     print(
         f"Ranker: {len(usable)} usable / {len(ranked)} scored, "
-        f"rendering {len(chosen)} unique (asked {needed})."
+        f"picked {len(chosen)} distinct windows (asked {needed})."
     )
     return chosen
+
+
+def _source_duration_seconds():
+    meta = PROJECT_ROOT / "output" / "metadata.json"
+    if not meta.exists():
+        return None
+    try:
+        data = json.loads(meta.read_text(encoding="utf-8"))
+        return float((data.get("format") or {}).get("duration") or 0) or None
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+
+def expand_with_alternate_windows(clips, needed, source_duration=None):
+    """Fill remaining demand with shifted windows.
+
+    Overlap with an existing highlight is fine. Exact same start/end is not —
+    each slot must get its own render so Shorts are not byte-identical copies.
+    """
+    if not clips or len(clips) >= needed:
+        return list(clips[:needed]) if clips else []
+
+    out = [dict(c) for c in clips]
+    seen_starts = {round(float(c.get("start") or 0), 1) for c in out}
+    try:
+        next_id = max(int(c.get("chunk_id") or 0) for c in out) + 1000
+    except (TypeError, ValueError):
+        next_id = 1000
+
+    offsets = (3.5, -3.5, 7.0, -7.0, 11.0, -11.0, 5.0, -5.0, 14.0, -14.0, 9.0, -9.0)
+    guard = 0
+    while len(out) < needed and guard < needed * len(offsets) * max(1, len(clips)):
+        guard += 1
+        base = clips[(guard - 1) % len(clips)]
+        shift = offsets[(guard - 1) % len(offsets)]
+        start = float(base.get("start") or 0) + shift
+        end = float(base.get("end") or 0) + shift
+        if start < 0:
+            end -= start
+            start = 0.0
+        if source_duration and end > source_duration:
+            delta = end - source_duration
+            start = max(0.0, start - delta)
+            end = source_duration
+        duration = end - start
+        if duration < 12:
+            continue
+        key = round(start, 1)
+        if key in seen_starts:
+            continue
+        # Avoid near-identical windows (under 1.5s drift from an existing cut).
+        if any(abs(key - s) < 1.5 for s in seen_starts):
+            continue
+        seen_starts.add(key)
+        variant = dict(base)
+        variant["chunk_id"] = next_id
+        next_id += 1
+        variant["start"] = round(start, 2)
+        variant["end"] = round(end, 2)
+        variant["duration_seconds"] = round(duration, 2)
+        variant["alternate_window"] = True
+        variant["variant_of"] = base.get("chunk_id")
+        reason = (base.get("highlight_reason") or "highlight").strip()
+        variant["highlight_reason"] = f"{reason} (alternate window)"
+        out.append(variant)
+
+    if len(out) < needed:
+        print(
+            f"⚠️  Only {len(out)} distinct windows available for {needed} slots "
+            "(source too short to shift further)."
+        )
+    else:
+        print(f"Expanded to {len(out)} distinct windows (overlap allowed, no exact copies).")
+    return out
 
 
 def main():
 
     top_k = get_top_k()
-    print(f"Selecting top {top_k} unique clips for video render...")
+    print(f"Selecting top {top_k} distinct clips for video render...")
 
     input_file = PROJECT_ROOT / "output" / "analysis.json"
 
@@ -180,24 +253,32 @@ def main():
         with open(transcript_file, "r", encoding="utf-8") as f:
             segments = (json.load(f) or {}).get("segments") or []
 
-    ranked = sorted(
+    ranked_all = sorted(
         data["results"],
         key=ranking_score,
         reverse=True
     )
-    for clip in ranked:
+    for clip in ranked_all:
         apply_to_clip(clip, segments)
 
-    ranked = remove_time_overlap(ranked)
+    diverse = remove_time_overlap(ranked_all)
     complete = [
-        c for c in ranked
+        c for c in diverse
         if not c.get("starts_mid_thought")
     ]
     if complete:
-        ranked = complete + [c for c in ranked if c.get("starts_mid_thought")]
-    strong = [c for c in ranked if float(c.get("overall_score") or 0) >= MIN_OVERALL_SCORE]
+        diverse = complete + [c for c in diverse if c.get("starts_mid_thought")]
+    strong = [c for c in diverse if float(c.get("overall_score") or 0) >= MIN_OVERALL_SCORE]
     print(f"Scan quality: {len(strong)} clips >= {MIN_OVERALL_SCORE} (early-stop bar).")
-    top_clips = pick_clips(ranked, top_k)
+
+    # Prefer diverse moments first, then overlapping analysis hits, then
+    # synthesize shifted windows so we never ship identical Shorts.
+    top_clips = pick_clips(diverse, top_k)
+    if len(top_clips) < top_k:
+        top_clips = pick_clips(ranked_all, top_k)
+    top_clips = expand_with_alternate_windows(
+        top_clips, top_k, source_duration=_source_duration_seconds()
+    )
 
     if not top_clips:
         raise RuntimeError(

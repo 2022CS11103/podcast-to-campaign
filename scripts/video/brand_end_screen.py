@@ -224,14 +224,15 @@ def render_end_card_image(brand: dict, width: int, height: int, dest: Path) -> P
         draw = ImageDraw.Draw(img)
 
         scale = width / 1080.0
-        name_font = _font(max(28, int(64 * scale)), bold=True)
-        secondary_font = _font(max(16, int(28 * scale)))
-        tertiary_font = _font(max(16, int(30 * scale)), bold=True)
-        max_text = int(width * 0.82)
+        # Phone Shorts need large type — these sizes read clearly on 1080x1920.
+        name_font = _font(max(64, int(152 * scale)), bold=True)
+        secondary_font = _font(max(36, int(64 * scale)))
+        tertiary_font = _font(max(40, int(72 * scale)), bold=True)
+        max_text = int(width * 0.9)
 
         layers = []
         if logo_path:
-            logo = _load_logo_rgba(logo_path, int(width * 0.34), int(height * 0.22))
+            logo = _load_logo_rgba(logo_path, int(width * 0.48), int(height * 0.28))
             if logo is not None:
                 layers.append(("logo", logo))
         if copy["name"]:
@@ -241,7 +242,7 @@ def render_end_card_image(brand: dict, width: int, height: int, dest: Path) -> P
         if copy["tertiary"]:
             layers.append(("tertiary", copy["tertiary"]))
 
-        gap = int(36 * scale)
+        gap = int(56 * scale)
         blocks = []
         total_h = 0
         for kind, payload in layers:
@@ -283,7 +284,7 @@ def render_end_card_image(brand: dict, width: int, height: int, dest: Path) -> P
     scale = width / 1080.0
     y = int(height * 0.32)
     if logo_path:
-        logo = _load_logo_rgba(logo_path, int(width * 0.34), int(height * 0.22))
+        logo = _load_logo_rgba(logo_path, int(width * 0.48), int(height * 0.28))
         if logo is not None:
             lh, lw = logo.shape[:2]
             x = (width - lw) // 2
@@ -294,7 +295,7 @@ def render_end_card_image(brand: dict, width: int, height: int, dest: Path) -> P
                 canvas[y:y + lh, x:x + lw] = (alpha * bgr + (1 - alpha) * roi).astype(np.uint8)
             else:
                 canvas[y:y + lh, x:x + lw] = logo
-            y += lh + int(48 * scale)
+            y += lh + int(64 * scale)
 
     def put_centered(text, font_scale, color, thickness):
         nonlocal y
@@ -302,14 +303,14 @@ def render_end_card_image(brand: dict, width: int, height: int, dest: Path) -> P
         x = max(20, (width - size[0]) // 2)
         bgr = (color[2], color[1], color[0])
         cv2.putText(canvas, text, (x, y + size[1]), font, font_scale, bgr, thickness, cv2.LINE_AA)
-        y += size[1] + int(36 * scale)
+        y += size[1] + int(52 * scale)
 
     if copy["name"]:
-        put_centered(copy["name"].upper()[:42], 1.6 * scale, NAME_COLOR, 3)
+        put_centered(copy["name"].upper()[:42], 3.2 * scale, NAME_COLOR, 7)
     if copy["secondary"]:
-        put_centered(copy["secondary"][:48], 0.9 * scale, MUTED, 2)
+        put_centered(copy["secondary"][:48], 1.85 * scale, MUTED, 4)
     if copy["tertiary"]:
-        put_centered(copy["tertiary"][:48], 1.05 * scale, WEBSITE_COLOR, 2)
+        put_centered(copy["tertiary"][:48], 2.15 * scale, WEBSITE_COLOR, 4)
     cv2.imwrite(str(dest), canvas)
     return dest
 
