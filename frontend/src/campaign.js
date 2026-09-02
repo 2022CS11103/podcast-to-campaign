@@ -80,6 +80,7 @@ export const DEFAULT_CAMPAIGN = {
   endScreenDuration: 3,
   endScreenTemplate: "logo_name_website",
   endScreenCta: "",
+  onScreenCaptionsEnabled: true,
   goal: "Brand awareness",
   audience: "Startup founders",
   tone: "Professional",

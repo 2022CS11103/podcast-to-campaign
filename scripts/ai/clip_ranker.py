@@ -8,7 +8,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
 from utils.content_plan import load_plan
-from utils.sentences import apply_to_clip
+from utils.sentences import apply_to_clip, trim_to_max_duration
 from utils.show_detect import keyword_hits
 from config.show_style import load_resolved
 from config.platform_specs import (
@@ -17,6 +17,7 @@ from config.platform_specs import (
     VIDEO_PLATFORMS,
     MIN_OVERALL_SCORE,
     USABLE_SCORE_FLOOR,
+    MASTER_CLIP_MAX_SECONDS,
 )
 
 
@@ -26,7 +27,11 @@ def overlap_ratio(a, b):
     return inter / union if union else 0.0
 
 
-def remove_time_overlap(results, iou_threshold=0.55):
+def _too_similar(clip, others, iou_threshold=0.35):
+    return any(overlap_ratio(clip, other) > iou_threshold for other in others)
+
+
+def remove_time_overlap(results, iou_threshold=0.45):
     """Keep the higher-scoring clip when two windows cover the same moment."""
     unique = []
     for clip in results:
@@ -171,12 +176,46 @@ def _source_duration_seconds():
         return None
 
 
-def expand_with_alternate_windows(clips, needed, source_duration=None):
-    """Fill remaining demand with shifted windows.
+def clip_is_complete(c):
+    if c.get("conversation_complete") is True:
+        return True
+    if c.get("ends_on_question"):
+        return False
+    if c.get("conversation_complete") is False:
+        return False
+    if c.get("payoff_arrives") is False:
+        return False
+    completeness = (c.get("scores") or {}).get("completeness")
+    if completeness is not None and completeness < 5:
+        return False
+    return True
 
-    Overlap with an existing highlight is fine. Exact same start/end is not —
-    each slot must get its own render so Shorts are not byte-identical copies.
-    """
+
+def clip_sort_key(c):
+    complete = clip_is_complete(c)
+    mid = bool(c.get("starts_mid_thought"))
+    score = float(c.get("overall_score") or 0)
+    return (complete, not mid, score)
+
+
+def fill_clip_slots(clips, needed):
+    """Prefer complete conversational clips, but always fill the render quota."""
+    ordered = sorted(clips, key=clip_sort_key, reverse=True)
+    out = []
+    seen = set()
+    for clip in ordered:
+        key = clip.get("chunk_id")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(clip)
+        if len(out) >= max(1, needed):
+            break
+    return out
+
+
+def expand_with_alternate_windows(clips, needed, source_duration=None, segments=None):
+    """Fill remaining demand with shifted windows snapped to sentence edges."""
     if not clips or len(clips) >= needed:
         return list(clips[:needed]) if clips else []
 
@@ -187,7 +226,7 @@ def expand_with_alternate_windows(clips, needed, source_duration=None):
     except (TypeError, ValueError):
         next_id = 1000
 
-    offsets = (3.5, -3.5, 7.0, -7.0, 11.0, -11.0, 5.0, -5.0, 14.0, -14.0, 9.0, -9.0)
+    offsets = (5.0, -5.0, 9.0, -9.0, 14.0, -14.0, 20.0, -20.0, 7.0, -7.0, 11.0, -11.0)
     guard = 0
     while len(out) < needed and guard < needed * len(offsets) * max(1, len(clips)):
         guard += 1
@@ -202,21 +241,28 @@ def expand_with_alternate_windows(clips, needed, source_duration=None):
             delta = end - source_duration
             start = max(0.0, start - delta)
             end = source_duration
-        duration = end - start
-        if duration < 12:
-            continue
-        key = round(start, 1)
-        if key in seen_starts:
-            continue
-        # Avoid near-identical windows (under 1.5s drift from an existing cut).
-        if any(abs(key - s) < 1.5 for s in seen_starts):
-            continue
-        seen_starts.add(key)
         variant = dict(base)
         variant["chunk_id"] = next_id
         next_id += 1
         variant["start"] = round(start, 2)
         variant["end"] = round(end, 2)
+        if segments:
+            apply_to_clip(variant, segments, max_duration=MASTER_CLIP_MAX_SECONDS)
+            start = float(variant.get("start") or 0)
+            end = float(variant.get("end") or 0)
+        duration = end - start
+        if duration < 12:
+            continue
+        if variant.get("starts_mid_thought"):
+            continue
+        key = round(start, 1)
+        if key in seen_starts:
+            continue
+        if any(abs(key - s) < 2.0 for s in seen_starts):
+            continue
+        if _too_similar(variant, out):
+            continue
+        seen_starts.add(key)
         variant["duration_seconds"] = round(duration, 2)
         variant["alternate_window"] = True
         variant["variant_of"] = base.get("chunk_id")
@@ -259,15 +305,18 @@ def main():
         reverse=True
     )
     for clip in ranked_all:
-        apply_to_clip(clip, segments)
+        apply_to_clip(clip, segments, max_duration=MASTER_CLIP_MAX_SECONDS)
 
     diverse = remove_time_overlap(ranked_all)
     complete = [
         c for c in diverse
-        if not c.get("starts_mid_thought")
+        if not c.get("starts_mid_thought") and clip_is_complete(c)
     ]
     if complete:
-        diverse = complete + [c for c in diverse if c.get("starts_mid_thought")]
+        diverse = complete + [
+            c for c in diverse
+            if c.get("starts_mid_thought") or not clip_is_complete(c)
+        ]
     strong = [c for c in diverse if float(c.get("overall_score") or 0) >= MIN_OVERALL_SCORE]
     print(f"Scan quality: {len(strong)} clips >= {MIN_OVERALL_SCORE} (early-stop bar).")
 
@@ -276,9 +325,18 @@ def main():
     top_clips = pick_clips(diverse, top_k)
     if len(top_clips) < top_k:
         top_clips = pick_clips(ranked_all, top_k)
-    top_clips = expand_with_alternate_windows(
-        top_clips, top_k, source_duration=_source_duration_seconds()
-    )
+    for clip in top_clips:
+        apply_to_clip(clip, segments, max_duration=MASTER_CLIP_MAX_SECONDS)
+    top_clips = fill_clip_slots(top_clips, top_k)
+    if len(top_clips) < top_k:
+        top_clips = expand_with_alternate_windows(
+            top_clips, top_k, source_duration=_source_duration_seconds(), segments=segments
+        )
+        for clip in top_clips:
+            apply_to_clip(clip, segments, max_duration=MASTER_CLIP_MAX_SECONDS)
+        top_clips = fill_clip_slots(top_clips, top_k)
+    complete_n = sum(1 for c in top_clips if clip_is_complete(c))
+    print(f"Selected {len(top_clips)} render(s) ({complete_n} conversation-complete).")
 
     if not top_clips:
         raise RuntimeError(

@@ -48,6 +48,7 @@ class ProcessRequest(BaseModel):
             ("end_screen_duration", "end_screen_duration"),
             ("end_screen_template", "end_screen_template"),
             ("end_screen_cta", "end_screen_cta"),
+            ("on_screen_captions_enabled", "on_screen_captions_enabled"),
         ):
             if src in data and data.get(src) is not None and dest not in brand:
                 brand[dest] = data[src]
@@ -167,6 +168,7 @@ class BrandUpdateRequest(BaseModel):
     end_screen_duration: Optional[int] = None
     end_screen_template: Optional[str] = None
     end_screen_cta: Optional[str] = None
+    on_screen_captions_enabled: Optional[bool] = None
     goal: Optional[str] = None
     audience: Optional[str] = None
     tone: Optional[str] = None

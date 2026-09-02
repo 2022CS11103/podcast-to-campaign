@@ -114,7 +114,7 @@ def _route_and_brand():
 
 def _timed(job_id, name, fn):
     job_manager.update(job_id, step=name, timing=snapshot())
-    print(f"\n⏱  {name} started")
+    print(f"\n[timer] {name} started")
     t0 = time.time()
     ok = True
     try:
@@ -125,7 +125,7 @@ def _timed(job_id, name, fn):
     finally:
         elapsed = time.time() - t0
         timing = log_step(name, elapsed, ok=ok)
-        print(f"⏱  {name} finished in {format_duration(elapsed)}")
+        print(f"[timer] {name} finished in {format_duration(elapsed)}")
         job_manager.update(job_id, timing=timing)
 
 

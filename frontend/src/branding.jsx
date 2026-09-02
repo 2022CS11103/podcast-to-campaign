@@ -18,6 +18,7 @@ export function formFromBrand(brand = {}) {
     endScreenDuration: brand.end_screen_duration || 3,
     endScreenTemplate: brand.end_screen_template || "logo_name_website",
     endScreenCta: brand.end_screen_cta || "",
+    onScreenCaptionsEnabled: brand.on_screen_captions_enabled !== false,
     hasLogo: Boolean(brand.has_logo),
     logoCache: Date.now(),
     logoName: "",
@@ -34,12 +35,29 @@ export function brandPayloadFromForm(value) {
     end_screen_duration: Number(value.endScreenDuration || 3),
     end_screen_template: value.endScreenTemplate || "logo_name_website",
     end_screen_cta: value.endScreenCta || "",
+    on_screen_captions_enabled: Boolean(value.onScreenCaptionsEnabled),
   };
 }
 
 export function brandLogoSrc(hasLogo, cacheKey) {
   if (!hasLogo) return "";
   return apiUrl(`/brand/logo?t=${cacheKey || 1}`);
+}
+
+function shortTagline(text, maxChars = 72) {
+  const cleaned = String(text || "").trim().replace(/\s+/g, " ");
+  if (!cleaned) return "";
+  const sentence = cleaned.split(/[.!?…]\s+/)[0].trim();
+  const candidate = sentence || cleaned;
+  if (candidate.length <= maxChars) return candidate;
+  const words = candidate.split(" ");
+  const out = [];
+  for (const word of words) {
+    const trial = [...out, word].join(" ");
+    if (trial.length > maxChars - 1) break;
+    out.push(word);
+  }
+  return out.length ? `${out.join(" ")}…` : `${candidate.slice(0, maxChars - 1)}…`;
 }
 
 function displayWebsite(url) {
@@ -57,7 +75,7 @@ export function EndScreenPreview({
 }) {
   const name = (brandName || "").trim() || "Your brand";
   const site = displayWebsite(website);
-  const line = (tagline || "").trim();
+  const line = shortTagline(tagline);
   const call = (cta || "").trim();
   let secondary = "";
   let tertiary = "";
@@ -81,6 +99,7 @@ export function EndScreenPreview({
           </div>
         )}
         <strong>{name}</strong>
+        <span className="end-screen-divider" aria-hidden="true" />
         {secondary ? <span className="end-screen-tag">{secondary}</span> : null}
         {tertiary ? <span className="end-screen-web">{tertiary}</span> : null}
       </div>
@@ -102,6 +121,21 @@ export function BrandingFields({
 
   return (
     <div className={`branding-fields ${compact ? "compact" : ""}`}>
+      <div className="branding-toggle-row">
+        <div>
+          <strong>Burn on-screen captions into Shorts / Reels</strong>
+          <p>Uses Whisper word timing (not Gemini). Great for muted autoplay; turn off for a cleaner look.</p>
+        </div>
+        <button
+          type="button"
+          className={`toggle ${value.onScreenCaptionsEnabled ? "on" : ""}`}
+          onClick={() => update("onScreenCaptionsEnabled", !value.onScreenCaptionsEnabled)}
+          aria-label={value.onScreenCaptionsEnabled ? "Disable on-screen captions" : "Enable on-screen captions"}
+        >
+          <span />
+        </button>
+      </div>
+
       <div className="branding-toggle-row">
         <div>
           <strong>Add end screen to generated videos</strong>
@@ -165,6 +199,7 @@ export function BrandingFields({
             onChange={(e) => update("tagline", e.target.value)}
             placeholder="Learn. Grow. Thrive."
           />
+          <small>Keep this short — long quotes get trimmed on the end screen.</small>
         </label>
         <label className="field">
           <span>CTA</span>

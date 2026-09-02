@@ -4,45 +4,54 @@ import subprocess
 import sys
 
 from agents.base_agent import BaseAgent
+from scripts.pipeline.download_video import local_video_for_url
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PYTHON = sys.executable
+_SUBPROCESS_LOG = PROJECT_ROOT / "output" / "_last_subprocess.log"
+
+
+def _safe_console_write(text: str) -> None:
+    """Worker threads on Windows can hit cp1252 / broken stdout — never crash on print."""
+    try:
+        print(text, end="" if text.endswith("\n") else "\n", flush=True)
+    except OSError:
+        pass
 
 
 def _run(args, cwd=PROJECT_ROOT):
-    """Stream child output. capture_output deadlocks on Windows when yt-dlp
-    floods stderr with download progress and the pipe buffer fills."""
+    """Run a pipeline script; log output to a file instead of a pipe.
+
+    Piping yt-dlp progress through a background thread can raise OSError on
+    Windows and was misreported as a failed YouTube save.
+    """
     env = {
         **os.environ,
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUTF8": "1",
         "PYTHONUNBUFFERED": "1",
     }
-    proc = subprocess.Popen(
-        args,
-        cwd=str(cwd),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-        bufsize=1,
-    )
-    lines = []
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        lines.append(line)
-        print(line, end="", flush=True)
-    proc.wait()
-    detail = "".join(lines).strip()
-    if proc.returncode != 0:
+    _SUBPROCESS_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(_SUBPROCESS_LOG, "w", encoding="utf-8", errors="replace") as log:
+        result = subprocess.run(
+            args,
+            cwd=str(cwd),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            env=env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    detail = _SUBPROCESS_LOG.read_text(encoding="utf-8", errors="replace").strip()
+    if detail:
+        _safe_console_write(detail if detail.endswith("\n") else detail + "\n")
+    if result.returncode != 0:
         marker = "YouTube blocked this download"
         if marker in detail:
             raise RuntimeError(detail[detail.rfind(marker):].strip()[:1200])
         cmd = " ".join(str(a) for a in args)
-        # Keep the real OS error visible (e.g. Errno 22) without losing context.
-        raise RuntimeError(f"{cmd}\n{detail[-2500:] or f'exit {proc.returncode}'}")
+        raise RuntimeError(f"{cmd}\n{detail[-2500:] or f'exit {result.returncode}'}")
     return detail
 
 
@@ -57,21 +66,18 @@ class VideoAgent(BaseAgent):
         self.log("Starting video processing...")
 
         if str(input_source).startswith("http://") or str(input_source).startswith("https://"):
-            # One argv: playlist query strings contain &, which a shell would split.
-            try:
+            url = str(input_source).strip()
+            if local_video_for_url(url):
+                self.log("Reusing the existing download for this YouTube link.")
+            else:
+                # One argv: playlist query strings contain &, which a shell would split.
                 _run(
                     [
                         self.python,
                         "scripts/pipeline/download_video.py",
-                        str(input_source).strip(),
+                        url,
                     ]
                 )
-            except OSError as exc:
-                raise RuntimeError(
-                    "YouTube download hit a Windows file error while saving the video. "
-                    "Try Again, or upload the MP4 instead."
-                ) from exc
-
             input_source = "input/video.mp4"
 
         video_path = Path(input_source)

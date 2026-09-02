@@ -19,6 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
+from config.platform_specs import MASTER_CLIP_MAX_SECONDS
 from config.editing_style import (
     CAPTION,
     MIN_SHOT_SECONDS,
@@ -30,7 +31,7 @@ from config.editing_style import (
     profile_for,
     rules_text,
 )
-from utils.sentences import snap_window
+from utils.sentences import snap_window, trim_to_max_duration, fit_conversation_window
 from utils.show_detect import hook_sentence
 from config.show_style import load_resolved
 from utils.gemini_clients import generate_content
@@ -82,6 +83,10 @@ Hard constraints:
   word of a complete sentence. Never start on a continuation (and/but/so/which).
   Never end mid-clause. Keep at least {min_keep}s and never cut more than
   {max_trim_pct}% of the window. Return the original window if it is already tight.
+- The finished spoken cut must be <= {max_clip_seconds}s (Shorts/Reels body limit).
+  If the window is longer, trim from the end on a sentence boundary.
+- Podcast rule: if the window ends on a question to the guest, extend through their
+  full answer until the exchange naturally closes. Never ship a question without the reply.
 - Use the timed transcript below to place at_src, payoff_at, and trim on real
   spoken moments. Do not invent timecodes.
 - punch_ins: {punch_lo} to {punch_hi} entries for this pace, zoom between
@@ -225,8 +230,16 @@ def _clamp_trim(plan, clip, rows, segments=None):
             t0 = max(start - 12.0, t1 - floor)
 
     pool = segments or rows
-    t0, t1 = snap_window(t0, t1, pool)
     show = load_resolved()
+    if show.get("id") == "interview":
+        t0, t1 = fit_conversation_window(
+            t0, t1, pool, max_seconds=MASTER_CLIP_MAX_SECONDS, min_seconds=TRIM["min_seconds"]
+        )
+    else:
+        t0, t1 = snap_window(t0, t1, pool)
+        t0, t1 = trim_to_max_duration(
+            t0, t1, pool, max_seconds=MASTER_CLIP_MAX_SECONDS, min_seconds=TRIM["min_seconds"]
+        )
     if show.get("keep_reactions"):
         extra = float((clip.get("visual_signals") or {}).get("reaction_seconds") or 0)
         hold = float(show.get("reaction_hold") or 1.8)
@@ -371,33 +384,18 @@ def _clamp_plan(plan, clip, rows, segments=None):
     show = load_resolved()
     hook_line = str(plan.get("hook_line") or (rows[0]["text"] if rows else ""))[:180]
     shot_order = _beats_to_order(plan.get("beats"), window)
-    if not shot_order and not show.get("keep_reactions"):
+    if not shot_order and not show.get("keep_reactions") and show.get("hook_first"):
         packed = pack_beats(
             rows,
             hook_line,
             payoff_at=payoff,
-            hook_first=True,
+            hook_first=False,
             min_keep=TRIM["min_seconds"],
         )
         if packed:
             shot_order = packed
             hook_line = str(plan.get("hook_line") or (rows[0]["text"] if rows else ""))[:180]
-    if not shot_order and show.get("hook_first"):
-        hook_row = hook_sentence(rows)
-        hs = float(hook_row["start"]) if hook_row else window[0]
-        he = float(hook_row["end"]) if hook_row else window[0]
-        if hook_row and hs > window[0] + 1.6 and he <= window[1] + 0.2:
-            shot_order = [
-                {"src_start": round(hs, 2), "src_end": round(min(he, window[1]), 2), "why": "hook first"},
-                {"src_start": round(window[0], 2), "src_end": round(hs, 2), "why": "context rewind"},
-            ]
-            if he < window[1] - 0.8:
-                shot_order.append({
-                    "src_start": round(he, 2),
-                    "src_end": round(window[1], 2),
-                    "why": "rest of the thought",
-                })
-            hook_line = str(plan.get("hook_line") or hook_row.get("text") or "")[:180]
+    # Non-linear "hook first then rewind" replays the same lines — disabled for interviews.
 
     reaction_hold = 0.0
     if show.get("keep_reactions"):
@@ -405,13 +403,19 @@ def _clamp_plan(plan, clip, rows, segments=None):
         if reaction_hold < 0.6:
             reaction_hold = float(show.get("reaction_hold") or 1.8)
 
+    if show.get("id") == "interview":
+        shot_order = []
+        drop_silences = False
+    else:
+        drop_silences = bool(plan.get("drop_silences", show.get("drop_silences", pace != "hold")))
+
     return {
         "goal": plan.get("goal") or show.get("goal") or "hook",
         "pace": pace if plan.get("pace") else show.get("pace") or pace,
         "reason": plan.get("reason") or fallback_plan(clip, rows)["reason"],
         "hook_line": hook_line,
         "trim": trim,
-        "drop_silences": bool(plan.get("drop_silences", show.get("drop_silences", pace != "hold"))),
+        "drop_silences": drop_silences,
         "punch_ins": _clamp_punches(plan, pace, window),
         "caption_mode": plan.get("caption_mode") or "keyword_pop",
         "emphasize": emphasize[: CAPTION["emphasize_max"]],
@@ -435,6 +439,7 @@ def direct_clip(clip, segments=None):
         show_rules=show.get("rules") or "",
         min_keep=int(TRIM["min_seconds"]),
         max_trim_pct=int(TRIM["max_fraction"] * 100),
+        max_clip_seconds=int(MASTER_CLIP_MAX_SECONDS),
         punch_lo=pace_hint["punch_ins"][0],
         punch_hi=pace_hint["punch_ins"][1],
         zoom_lo=pace_hint["zoom"][0],
