@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import subprocess
 import sys
 
@@ -9,24 +10,40 @@ PYTHON = sys.executable
 
 
 def _run(args, cwd=PROJECT_ROOT):
-    result = subprocess.run(
+    """Stream child output. capture_output deadlocks on Windows when yt-dlp
+    floods stderr with download progress and the pipe buffer fills."""
+    env = {
+        **os.environ,
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+        "PYTHONUNBUFFERED": "1",
+    }
+    proc = subprocess.Popen(
         args,
         cwd=str(cwd),
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=env,
+        bufsize=1,
     )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
+    lines = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        lines.append(line)
+        print(line, end="", flush=True)
+    proc.wait()
+    detail = "".join(lines).strip()
+    if proc.returncode != 0:
         marker = "YouTube blocked this download"
         if marker in detail:
             raise RuntimeError(detail[detail.rfind(marker):].strip()[:1200])
         cmd = " ".join(str(a) for a in args)
-        raise RuntimeError(f"{cmd}\n{detail[-2500:]}")
-    if result.stdout:
-        print(result.stdout)
-    return result
+        # Keep the real OS error visible (e.g. Errno 22) without losing context.
+        raise RuntimeError(f"{cmd}\n{detail[-2500:] or f'exit {proc.returncode}'}")
+    return detail
 
 
 class VideoAgent(BaseAgent):
@@ -41,26 +58,41 @@ class VideoAgent(BaseAgent):
 
         if str(input_source).startswith("http://") or str(input_source).startswith("https://"):
             # One argv: playlist query strings contain &, which a shell would split.
-            _run(
-                [
-                    self.python,
-                    "scripts/pipeline/download_video.py",
-                    str(input_source).strip(),
-                ]
-            )
+            try:
+                _run(
+                    [
+                        self.python,
+                        "scripts/pipeline/download_video.py",
+                        str(input_source).strip(),
+                    ]
+                )
+            except OSError as exc:
+                raise RuntimeError(
+                    "YouTube download hit a Windows file error while saving the video. "
+                    "Try Again, or upload the MP4 instead."
+                ) from exc
 
             input_source = "input/video.mp4"
 
+        video_path = Path(input_source)
+        if not video_path.is_absolute():
+            video_path = PROJECT_ROOT / video_path
+        if not video_path.exists():
+            raise RuntimeError(
+                f"Source video not found: {video_path}. "
+                "Re-upload the file or paste the YouTube URL again."
+            )
+
         self.memory.update(
             "video_path",
-            input_source
+            str(input_source)
         )
 
         _run(
             [
                 self.python,
                 "scripts/pipeline/video_processor.py",
-                input_source
+                str(input_source)
             ]
         )
 

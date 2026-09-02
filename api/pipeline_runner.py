@@ -36,6 +36,7 @@ def _public_error(exc: Exception) -> str:
     bot = "not a bot" in lowered or "sign in to confirm" in lowered or "bot check" in lowered
     locked = "could not copy chrome cookie database" in lowered
     forbidden = "http error 403" in lowered or "po token" in lowered or "403 forbidden" in lowered
+    errno22 = "errno 22" in lowered or "invalid argument" in lowered
     if bot or locked or forbidden:
         marker = "YouTube blocked this download"
         if marker in text:
@@ -44,6 +45,11 @@ def _public_error(exc: Exception) -> str:
             "YouTube blocked the download. "
             "Try Again — paste-a-link does not require a signed-in browser. "
             "If YouTube keeps challenging this network, upload the MP4 instead."
+        )
+    if errno22:
+        return (
+            "YouTube download hit a Windows file error while saving the video. "
+            "Try Again once. If it keeps failing, use Upload video with the MP4 instead."
         )
     return text
 
@@ -65,8 +71,13 @@ RENDER_DIRS = [
 def _wipe_output_dirs(names):
     for name in names:
         stale = PROJECT_ROOT / "output" / name
-        if stale.exists():
+        if not stale.exists():
+            continue
+        try:
             shutil.rmtree(stale)
+        except OSError as exc:
+            # Don't abort a campaign because Windows still has a preview open.
+            print(f"⚠️  Could not clear output/{name}: {exc}")
 
 
 def _run_script(script: str):

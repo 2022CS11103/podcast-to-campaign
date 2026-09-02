@@ -259,6 +259,9 @@ def _base_opts(tmpl: str, clients: list) -> dict:
         "retries": 5,
         "fragment_retries": 5,
         "nocheckcertificate": True,
+        # Windows raises [Errno 22] Invalid argument when yt-dlp applies
+        # a Last-Modified / upload timestamp outside the valid range.
+        "mtime": False,
         "js_runtimes": _js_runtimes(),
         "remote_components": ["ejs:github"],
     }
@@ -267,11 +270,20 @@ def _base_opts(tmpl: str, clients: list) -> dict:
     return opts
 
 
+def _safe_unlink(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        # File may still be open in Explorer / Defender / a previous probe.
+        print(f"Could not remove {path.name}: {exc}", file=sys.stderr)
+
+
 def _clear_partials(input_dir: Path, output_path: Path) -> None:
-    if output_path.exists():
-        output_path.unlink()
+    _safe_unlink(output_path)
     for leftover in input_dir.glob("video.*"):
-        leftover.unlink()
+        _safe_unlink(leftover)
+    for leftover in input_dir.glob("_thin_backup.mp4"):
+        _safe_unlink(leftover)
 
 
 def _bot_help(url: str, tried: list[str], locked_cookies: bool = False, forbidden: bool = False) -> str:

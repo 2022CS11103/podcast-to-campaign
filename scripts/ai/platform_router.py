@@ -126,9 +126,10 @@ def fill_platform_slots(clips, count, platform, used_ids):
 
 def assign_distinct_video_slots(clips, plan):
     """
-    Round-robin Shorts / Reels / TikTok so the first Reel is not the
-    same file as the first Short. Prefer a moment that no video
-    platform has used yet.
+    Round-robin Shorts / Reels / TikTok onto distinct cuts only.
+
+    Never assign the exact same chunk/file twice. Overlapping windows
+    from the ranker are fine; byte-identical copies are not.
     """
     platforms = [
         p for p in VIDEO_PLATFORMS
@@ -139,18 +140,13 @@ def assign_distinct_video_slots(clips, plan):
     assigned_ids = set()
     picks = {p: [] for p in platforms}
 
+    def _rank(pool, platform):
+        return sorted(pool, key=lambda c: platform_fit_score(c, platform), reverse=True)
+
     def best_for(platform):
         unused_global = [c for c in clips if c.get("chunk_id") not in assigned_ids]
-        unused_here = [c for c in clips if c.get("chunk_id") not in used_on[platform]]
-        unused_global.sort(key=lambda c: platform_fit_score(c, platform), reverse=True)
-        unused_here.sort(key=lambda c: platform_fit_score(c, platform), reverse=True)
         if unused_global:
-            return unused_global[0], False
-        if unused_here:
-            return unused_here[0], False
-        ranked = sorted(clips, key=lambda c: platform_fit_score(c, platform), reverse=True)
-        if ranked:
-            return ranked[0], True
+            return _rank(unused_global, platform)[0], False
         return None, False
 
     while any(remaining[p] > 0 for p in platforms):
@@ -158,20 +154,36 @@ def assign_distinct_video_slots(clips, plan):
         for platform in platforms:
             if remaining[platform] <= 0:
                 continue
-            clip, looped = best_for(platform)
+            clip, _looped = best_for(platform)
             if clip is None:
                 continue
-            reused_on_this_platform = clip.get("chunk_id") in used_on[platform]
-            picks[platform].append((clip, reused_on_this_platform or looped))
+            picks[platform].append((clip, False))
             used_on[platform].add(clip.get("chunk_id"))
             assigned_ids.add(clip.get("chunk_id"))
             remaining[platform] -= 1
             progressed = True
         if not progressed:
             break
+
+    for platform, left in remaining.items():
+        if left > 0:
+            print(
+                f"   ⚠️  {platform}: {left} slot(s) unfilled — not enough distinct cuts "
+                "(refusing to duplicate the exact same Short/Reel)."
+            )
     for platform, chosen in picks.items():
         unique_n = len({c.get("chunk_id") for c, _ in chosen})
         print(f"   {platform}: {len(chosen)} slots from {unique_n} distinct moments")
+    ids = {p: {c.get("chunk_id") for c, _ in chosen} for p, chosen in picks.items()}
+    if "youtube_shorts" in ids and "instagram_reels" in ids:
+        overlap = ids["youtube_shorts"] & ids["instagram_reels"]
+        if overlap:
+            print(
+                f"   ⚠️  Shorts and Reels share moment(s) {sorted(overlap)} "
+                "because there were not enough unique cuts in the talk."
+            )
+        else:
+            print("   Shorts and Reels use different moments of the source video.")
     return picks
 
 

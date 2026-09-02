@@ -203,11 +203,11 @@ button:disabled { cursor: not-allowed; opacity: .45; }
   box-shadow: inset 0 0 0 1px rgba(139, 92, 246, .18);
   text-align: center;
 }
-.end-screen-preview strong { font-size: 15px; letter-spacing: .04em; text-transform: uppercase; }
-.end-screen-logo { width: 64px; height: 64px; object-fit: contain; }
+.end-screen-preview strong { font-size: 26px; letter-spacing: .04em; text-transform: uppercase; }
+.end-screen-logo { width: 88px; height: 88px; object-fit: contain; }
 .end-screen-logo.placeholder { display: grid; place-items: center; border-radius: 14px; background: #18181B; color: var(--subtle); border: 1px dashed var(--line-strong); }
-.end-screen-tag { color: var(--muted); font-size: 11px; line-height: 1.4; }
-.end-screen-web { color: #C4B5FD; font-size: 11px; }
+.end-screen-tag { color: var(--muted); font-size: 17px; line-height: 1.4; }
+.end-screen-web { color: #C4B5FD; font-size: 18px; font-weight: 600; }
 .processing-hero { padding: 24px; margin-bottom: 18px; border: 1px solid var(--line); border-radius: 22px; background: var(--card); position: relative; overflow: hidden; }
 .processing-hero::before {
   content: "";
