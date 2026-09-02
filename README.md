@@ -1,3 +1,8 @@
+cd /Users/adityamittal/pgit/podcast-to-campaign
+source .venv/bin/activate
+export PYTHONIOENCODING=utf-8
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+
 # CreatorOS
 
 **One video. A month of content.**

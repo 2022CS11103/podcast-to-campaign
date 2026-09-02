@@ -1,10 +1,16 @@
 {
-  "brand_name": "CreatorOS",
-  "website": "",
+  "brand_name": "Radiant Minds",
+  "website": "radiantmindsma.com",
+  "tagline": "Renew Strength and Resilience",
   "goal": "Brand awareness",
-  "audience": "Startup founders",
+  "audience": "Heal Patients",
   "tone": "Professional",
   "show_type": "auto",
   "campaign_duration_days": 30,
-  "campaign_start_date": "2026-08-25"
+  "campaign_start_date": "2026-08-25",
+  "logo_path": "input/brand/logo_7965ecf1bd854c60908b2a2754252589.png",
+  "end_screen_enabled": true,
+  "end_screen_duration": 3,
+  "end_screen_template": "logo_name_website",
+  "end_screen_cta": ""
 }

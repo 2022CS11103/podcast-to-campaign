@@ -1,5 +1,5 @@
 {
-    "video_path": "input/video.mp4",
+    "video_path": "/Users/adityamittal/pgit/podcast-to-campaign/input/uploads/20d5199f05eb4cdf9a229a83f16dce10.mp4",
     "audio_path": "output/audio.wav",
     "metadata_path": "output/metadata.json",
     "transcript_path": "output/transcript.json",
@@ -12,8 +12,8 @@
     "marketing_folder": "output",
     "marketing_completed": true,
     "edit_quality": {
-        "average_score": 98,
-        "passed": 5,
+        "average_score": 100,
+        "passed": 2,
         "failed": 0
     }
 }
