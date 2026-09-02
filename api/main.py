@@ -134,6 +134,13 @@ def _merge_scope(current: dict, override: dict) -> dict:
 
 @app.on_event("startup")
 def startup_event():
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            if stream is not None and hasattr(stream, "reconfigure"):
+                try:
+                    stream.reconfigure(encoding="utf-8", errors="replace")
+                except (OSError, ValueError):
+                    pass
     start_worker()
 
 

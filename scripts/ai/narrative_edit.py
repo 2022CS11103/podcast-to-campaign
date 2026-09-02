@@ -109,10 +109,7 @@ def pack_beats(rows, hook_line="", payoff_at=None, hook_first=False, min_keep=No
         return []
 
     rest = [row for row in keep_sorted if row is not hook]
-    if hook_first and float(hook["start"]) > float(sentences[0]["start"]) + 1.4:
-        ordered = [hook, *rest]
-    else:
-        ordered = keep_sorted
+    ordered = sorted([hook, *rest], key=lambda row: float(row["start"]))
 
     beats = []
     roles = ["hook", "context", "statement", "payoff"]

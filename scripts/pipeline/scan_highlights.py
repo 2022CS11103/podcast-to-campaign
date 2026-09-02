@@ -1,9 +1,9 @@
 """
-Walk the talk in time slices. As soon as enough clips clear the
-quality threshold, stop — do not transcribe or score the rest.
+Walk the talk in time slices until we have enough high-score,
+conversation-complete clips for the requested Reels + Shorts count.
 
-That is what makes a 1-hour lecture cheap: we only "watch" until
-we have usable Shorts/Reels, then cut those and quit.
+Only then stop early. If quota is not met, keep scanning through the
+full source (hard-capped at HARD_MAX_SCAN_SECONDS).
 """
 
 import gc
@@ -25,12 +25,13 @@ from config.platform_specs import (
     SCAN_WINDOW_SECONDS,
     SCAN_OVERLAP_SECONDS,
     CANDIDATES_PER_WINDOW,
-    MAX_SCAN_SECONDS,
     HARD_MAX_SCAN_SECONDS,
     VIDEO_ANALYSIS_ENABLED,
+    MASTER_CLIP_MAX_SECONDS,
     video_clip_demand,
     largest_video_count,
 )
+from scripts.ai.clip_ranker import clip_is_complete, ranking_score, remove_time_overlap
 from utils.content_plan import load_plan, plan_is_usable
 from utils.cost_tracker import log_whisper_time
 from scripts.pipeline.transcribe_backend import close_worker, transcribe_wav_file
@@ -45,7 +46,6 @@ from scripts.pipeline.visual_energy import (
     heuristic_boost,
 )
 from scripts.ai.clip_intelligence import score_chunk
-from scripts.ai.clip_ranker import ranking_score, remove_time_overlap
 from utils.show_detect import detect_show, laughter_in_span
 
 OUTPUT = PROJECT_ROOT / "output"
@@ -235,9 +235,12 @@ def main():
         duration = 24 * 3600
 
     needed, largest = clips_needed()
+    hard_cap = min(float(duration), float(HARD_MAX_SCAN_SECONDS))
     print(
-        f"Chunk scan: take {int(SCAN_WINDOW_SECONDS)}s, score it, repeat until "
-        f"{needed} clips. Weak opening? keep walking (hard cap {int(HARD_MAX_SCAN_SECONDS / 60)} min)."
+        f"Chunk scan: take {int(SCAN_WINDOW_SECONDS)}s, score it, keep going until "
+        f"{needed} strong conversation-complete clips "
+        f"(score >= {MIN_OVERALL_SCORE}), or the full video "
+        f"(cap {int(hard_cap / 60)} min)."
     )
 
     engine = "whisper-isolated"
@@ -263,7 +266,7 @@ def main():
             stage="transcript",
             label="Watching and listening for standout moments",
             scanned_seconds=round(start, 1),
-        max_scan_seconds=HARD_MAX_SCAN_SECONDS,
+            max_scan_seconds=hard_cap,
             source_seconds=round(duration, 1),
             needed=needed,
         )
@@ -322,7 +325,7 @@ def main():
         to_score = []
         for cand in window_chunks:
             cand = dict(cand)
-            apply_to_clip(cand, all_segments)
+            apply_to_clip(cand, all_segments, max_duration=MASTER_CLIP_MAX_SECONDS)
             cand["chunk_id"] = chunk_id
             chunk_id += 1
             to_score.append(cand)
@@ -330,34 +333,50 @@ def main():
         all_analysis.extend(score_window(to_score))
 
         strong, usable, _ranked = good_clips(all_analysis)
+        strong_complete = 0
+        for cand in all_analysis:
+            row = dict(cand)
+            apply_to_clip(row, all_segments, max_duration=MASTER_CLIP_MAX_SECONDS)
+            if (
+                float(row.get("overall_score") or 0) >= MIN_OVERALL_SCORE
+                and clip_is_complete(row)
+            ):
+                strong_complete += 1
         print(
             f"  so far: {len(strong)} strong (>= {MIN_OVERALL_SCORE}), "
-            f"{len(usable)} usable (>= {USABLE_SCORE_FLOOR}) "
-            f"(scanned {scanned:.0f}s / {duration:.0f}s)"
+            f"{len(usable)} usable (>= {USABLE_SCORE_FLOOR}), "
+            f"{strong_complete} strong+complete "
+            f"(scanned {scanned:.0f}s / {duration:.0f}s, need {needed})"
         )
         write_progress(
             stage="transcript",
             label="Watching and listening for standout moments",
             scanned_seconds=round(scanned, 1),
-        max_scan_seconds=HARD_MAX_SCAN_SECONDS,
+            max_scan_seconds=hard_cap,
             source_seconds=round(duration, 1),
             strong=len(strong),
             usable=len(usable),
             needed=needed,
+            complete=strong_complete,
         )
-        if len(usable) >= needed or len(strong) >= needed:
-            stopped_early = True
-            print("  enough scored chunks — rest of video skipped.")
-            break
-        if scanned >= MAX_SCAN_SECONDS:
+        # Original contract: keep scanning until we have enough high-score
+        # conversation-complete moments for Reels + Shorts — then stop.
+        if strong_complete >= needed:
             stopped_early = True
             print(
-                f"  {int(MAX_SCAN_SECONDS / 60)} min cap "
-                f"({len(usable)} usable) — ranking the best of what we have."
+                f"  quota hit: {strong_complete} strong conversation-complete clips "
+                f"(need {needed}) — rest of video skipped."
             )
             break
-        if len(usable) == 0:
-            print("  opening is weak — next chunk, not the full talk.")
+        if scanned >= hard_cap:
+            stopped_early = True
+            print(
+                f"  reached end of scan window ({int(hard_cap / 60)} min) with "
+                f"{strong_complete}/{needed} complete — ranking the best so far."
+            )
+            break
+        if len(usable) == 0 and scanned >= 180:
+            print("  opening is weak — keeping walk through the talk.")
 
         start += max(8.0, window - SCAN_OVERLAP_SECONDS)
 

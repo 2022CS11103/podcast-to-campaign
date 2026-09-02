@@ -7,6 +7,7 @@ Failures leave the original clip in place.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,7 @@ from utils.brand_settings import (  # noqa: E402
     load_brand,
     resolve_logo_path,
 )
+from config.platform_specs import SHORTS_PLATFORM_MAX_SECONDS  # noqa: E402
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -39,11 +41,34 @@ BANK_FILE = OUTPUT / "content_bank.json"
 REPORT_FILE = OUTPUT / "end_screen_report.json"
 PLATFORM_FOLDERS = ("youtube_shorts", "instagram_reels", "tiktok")
 
-BG = (12, 12, 18)
-ACCENT = (139, 92, 246)
-NAME_COLOR = (244, 244, 245)
-MUTED = (161, 161, 170)
-WEBSITE_COLOR = (167, 139, 250)
+BG = (10, 10, 14)
+BG_MID = (22, 18, 32)
+ACCENT = (167, 139, 250)
+ACCENT_SOFT = (88, 52, 180)
+NAME_COLOR = (250, 250, 252)
+MUTED = (168, 168, 178)
+WEBSITE_COLOR = (250, 250, 252)
+WEBSITE_PILL = (99, 58, 198)
+DIVIDER = (72, 58, 110)
+
+
+def _short_tagline(text: str, max_chars: int = 42) -> str:
+    """End cards need a short line — not a full poem or paragraph."""
+    cleaned = re.sub(r"\s+", " ", (text or "").strip().strip("\"'“”"))
+    if not cleaned:
+        return ""
+    sentence = re.split(r"[.!?…]\s+", cleaned, maxsplit=1)[0].strip()
+    candidate = sentence or cleaned
+    if len(candidate) <= max_chars:
+        return candidate
+    words = candidate.split()
+    out = []
+    for word in words:
+        trial = " ".join(out + [word])
+        if len(trial) > max_chars - 1:
+            break
+        out.append(word)
+    return (" ".join(out) + "…") if out else candidate[: max_chars - 1] + "…"
 
 
 def _even(value: int) -> int:
@@ -109,7 +134,11 @@ def choose_duration(clip_seconds: float, requested: int) -> float | None:
     if clip_seconds < 4:
         return None
     cap = max(2, int(clip_seconds * 0.3))
-    return float(min(requested, cap))
+    # Whole file must stay inside the Shorts limit once the end card is appended.
+    room = max(0, int(SHORTS_PLATFORM_MAX_SECONDS - clip_seconds))
+    if room < 2:
+        return None
+    return float(min(requested, cap, room))
 
 
 def _font(size: int, bold: bool = False):
@@ -180,7 +209,7 @@ def _load_logo_rgba(path: Path, max_w: int, max_h: int):
 def card_copy(brand: dict) -> dict:
     name = (brand.get("brand_name") or "").strip()
     website = display_website(brand.get("website") or "")
-    tagline = (brand.get("tagline") or "").strip()
+    tagline = _short_tagline(brand.get("tagline") or "")
     cta = (brand.get("end_screen_cta") or "").strip()
     template = brand.get("end_screen_template") or "logo_name_website"
     if template not in ("logo_name", "logo_name_website", "logo_cta"):
@@ -197,7 +226,9 @@ def card_copy(brand: dict) -> dict:
         else:
             secondary = tagline
     else:
-        secondary = tagline
+        # Long poems/paragraphs clutter Shorts — keep only a crisp line.
+        raw = (brand.get("tagline") or "").strip()
+        secondary = tagline if len(raw) <= 90 else ""
         tertiary = website
     return {
         "name": name,
@@ -207,6 +238,32 @@ def card_copy(brand: dict) -> dict:
     }
 
 
+def _draw_modern_backdrop(width: int, height: int):
+    """Soft vertical gradient + vignette for phone Shorts/Reels."""
+    img = Image.new("RGB", (width, height), BG)
+    pixels = img.load()
+    for y in range(height):
+        t = y / max(height - 1, 1)
+        lift = max(0.0, 1.0 - abs(t - 0.28) * 2.2)
+        r = int(BG[0] + (BG_MID[0] - BG[0]) * (0.35 + 0.45 * lift))
+        g = int(BG[1] + (BG_MID[1] - BG[1]) * (0.35 + 0.45 * lift))
+        b = int(BG[2] + (BG_MID[2] - BG[2]) * (0.45 + 0.55 * lift))
+        for x in range(width):
+            edge = min(x, width - 1 - x) / max(width * 0.5, 1)
+            shade = 0.78 + 0.22 * min(1.0, edge * 1.4)
+            pixels[x, y] = (int(r * shade), int(g * shade), int(b * shade))
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    odraw = ImageDraw.Draw(overlay)
+    glow_r = int(width * 0.42)
+    cx, cy = width // 2, int(height * 0.30)
+    for i, alpha in ((glow_r, 28), (int(glow_r * 0.72), 42), (int(glow_r * 0.46), 58)):
+        odraw.ellipse((cx - i, cy - i, cx + i, cy + i), fill=(*ACCENT_SOFT, alpha))
+    rail = max(3, height // 220)
+    odraw.rectangle((0, 0, width, rail), fill=(*ACCENT, 200))
+    odraw.rectangle((0, height - rail, width, height), fill=(*ACCENT, 140))
+    return Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
+
+
 def render_end_card_image(brand: dict, width: int, height: int, dest: Path) -> Path:
     width, height = _even(width), _even(height)
     copy = card_copy(brand)
@@ -214,77 +271,151 @@ def render_end_card_image(brand: dict, width: int, height: int, dest: Path) -> P
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     if HAS_PIL:
-        img = Image.new("RGB", (width, height), BG)
-        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        odraw = ImageDraw.Draw(overlay)
-        accent_h = max(4, height // 180)
-        odraw.rectangle((0, 0, width, accent_h), fill=(*ACCENT, 220))
-        odraw.rectangle((0, height - accent_h, width, height), fill=(*ACCENT, 160))
-        img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
-        draw = ImageDraw.Draw(img)
-
+        img = _draw_modern_backdrop(width, height)
+        base = img.convert("RGBA")
+        draw_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(draw_layer)
         scale = width / 1080.0
-        # Phone Shorts need large type — these sizes read clearly on 1080x1920.
-        name_font = _font(max(64, int(152 * scale)), bold=True)
-        secondary_font = _font(max(36, int(64 * scale)))
-        tertiary_font = _font(max(40, int(72 * scale)), bold=True)
-        max_text = int(width * 0.9)
+
+        name_font = _font(max(70, int(112 * scale)), bold=True)
+        secondary_font = _font(max(32, int(44 * scale)))
+        tertiary_font = _font(max(34, int(48 * scale)), bold=True)
+        max_text = int(width * 0.82)
 
         layers = []
         if logo_path:
-            logo = _load_logo_rgba(logo_path, int(width * 0.48), int(height * 0.28))
+            logo = _load_logo_rgba(logo_path, int(width * 0.56), int(height * 0.32))
             if logo is not None:
                 layers.append(("logo", logo))
         if copy["name"]:
-            layers.append(("name", copy["name"].upper()))
+            layers.append(("name", copy["name"]))
         if copy["secondary"]:
             layers.append(("secondary", copy["secondary"]))
         if copy["tertiary"]:
             layers.append(("tertiary", copy["tertiary"]))
 
-        gap = int(56 * scale)
+        gap = int(34 * scale)
         blocks = []
         total_h = 0
         for kind, payload in layers:
             if kind == "logo":
-                blocks.append((kind, payload, payload.size))
-                total_h += payload.size[1]
-            else:
-                font = name_font if kind == "name" else tertiary_font if kind == "tertiary" else secondary_font
-                lines = _wrap_text(draw, payload, font, max_text) or [payload]
-                line_h = int(getattr(font, "size", 28) * 1.25)
+                plate = int(max(payload.size) * 1.16)
+                blocks.append(("logo", payload, (plate, plate)))
+                total_h += plate
+            elif kind == "name":
+                lines = _wrap_text(draw, payload, name_font, max_text) or [payload]
+                line_h = int(getattr(name_font, "size", 48) * 1.12)
                 blocks.append((kind, lines, (0, line_h * len(lines))))
                 total_h += line_h * len(lines)
+            elif kind == "secondary":
+                lines = _wrap_text(draw, payload, secondary_font, max_text) or [payload]
+                line_h = int(getattr(secondary_font, "size", 28) * 1.28)
+                blocks.append((kind, lines, (0, line_h * len(lines))))
+                total_h += line_h * len(lines)
+            else:
+                pill_h = int(getattr(tertiary_font, "size", 28) * 1.9)
+                blocks.append((kind, [payload], (0, pill_h)))
+                total_h += pill_h
             total_h += gap
         total_h = max(0, total_h - gap)
-        y = max(int(height * 0.18), (height - total_h) // 2)
+        y = max(int(height * 0.14), (height - total_h) // 2)
 
         for kind, payload, size in blocks:
             if kind == "logo":
-                x = (width - size[0]) // 2
-                img.paste(payload, (x, y), payload)
-                y += size[1] + gap
+                plate = size[0]
+                px = (width - plate) // 2
+                plate_img = Image.new("RGBA", (plate, plate), (0, 0, 0, 0))
+                pdraw = ImageDraw.Draw(plate_img)
+                inset = int(8 * scale)
+                # Soft white plate — works for transparent PNGs and solid square logos.
+                pdraw.rounded_rectangle(
+                    (inset, inset, plate - inset, plate - inset),
+                    radius=int(plate * 0.18),
+                    fill=(255, 255, 255, 235),
+                    outline=(*ACCENT, 90),
+                    width=max(2, int(2 * scale)),
+                )
+                lx = (plate - payload.size[0]) // 2
+                ly = (plate - payload.size[1]) // 2
+                plate_img.paste(payload, (lx, ly), payload)
+                draw_layer.paste(plate_img, (px, y), plate_img)
+                y += plate + gap
                 continue
-            font = name_font if kind == "name" else tertiary_font if kind == "tertiary" else secondary_font
-            fill = NAME_COLOR if kind == "name" else WEBSITE_COLOR if kind == "tertiary" else MUTED
+
+            if kind == "name":
+                max_line_w = 0
+                for line in payload:
+                    tw = (
+                        draw.textlength(line, font=name_font)
+                        if hasattr(draw, "textlength")
+                        else name_font.getlength(line)
+                    )
+                    max_line_w = max(max_line_w, tw)
+                    draw.text(((width - tw) / 2, y), line, font=name_font, fill=(*NAME_COLOR, 255))
+                    y += int(getattr(name_font, "size", 48) * 1.12)
+                line_w = max(int(width * 0.12), int(max_line_w * 0.42))
+                ly = y + int(10 * scale)
+                draw.rounded_rectangle(
+                    ((width - line_w) / 2, ly, (width + line_w) / 2, ly + max(3, int(4 * scale))),
+                    radius=2,
+                    fill=(*ACCENT, 230),
+                )
+                y += gap + int(16 * scale)
+                continue
+
+            if kind == "secondary":
+                for line in payload:
+                    tw = (
+                        draw.textlength(line, font=secondary_font)
+                        if hasattr(draw, "textlength")
+                        else secondary_font.getlength(line)
+                    )
+                    draw.text(((width - tw) / 2, y), line, font=secondary_font, fill=(*MUTED, 255))
+                    y += int(getattr(secondary_font, "size", 28) * 1.28)
+                y += gap
+                continue
+
             for line in payload:
-                tw = draw.textlength(line, font=font) if hasattr(draw, "textlength") else font.getlength(line)
-                draw.text(((width - tw) / 2, y), line, font=font, fill=fill)
-                y += int(getattr(font, "size", 28) * 1.25)
-            y += gap
-        img.save(dest, "PNG")
+                tw = (
+                    draw.textlength(line, font=tertiary_font)
+                    if hasattr(draw, "textlength")
+                    else tertiary_font.getlength(line)
+                )
+                pad_x = int(30 * scale)
+                pill_w = tw + pad_x * 2
+                pill_h = int(getattr(tertiary_font, "size", 28) * 1.9)
+                px = (width - pill_w) / 2
+                draw.rounded_rectangle(
+                    (px, y, px + pill_w, y + pill_h),
+                    radius=int(pill_h / 2),
+                    fill=(*WEBSITE_PILL, 245),
+                )
+                ty = y + (pill_h - getattr(tertiary_font, "size", 28)) / 2 - 1
+                draw.text((px + pad_x, ty), line, font=tertiary_font, fill=(*WEBSITE_COLOR, 255))
+                y += pill_h + gap
+
+        out = Image.alpha_composite(base, draw_layer).convert("RGB")
+        out.save(dest, "PNG")
         return dest
 
     canvas = np.zeros((height, width, 3), dtype=np.uint8)
-    canvas[:] = (BG[2], BG[1], BG[0])
-    bar = max(4, height // 180)
+    for row in range(height):
+        t = row / max(height - 1, 1)
+        lift = max(0.0, 1.0 - abs(t - 0.28) * 2.2)
+        shade = 0.82 + 0.18 * lift
+        canvas[row, :] = (
+            int(BG[2] * shade + BG_MID[2] * (1 - shade) * 0.5),
+            int(BG[1] * shade + BG_MID[1] * (1 - shade) * 0.5),
+            int(BG[0] * shade + BG_MID[0] * (1 - shade) * 0.5),
+        )
+    bar = max(3, height // 220)
     canvas[0:bar, :] = (ACCENT[2], ACCENT[1], ACCENT[0])
     canvas[height - bar:height, :] = (ACCENT[2], ACCENT[1], ACCENT[0])
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = width / 1080.0
-    y = int(height * 0.32)
+    y = int(height * 0.22)
     if logo_path:
-        logo = _load_logo_rgba(logo_path, int(width * 0.48), int(height * 0.28))
+        logo = _load_logo_rgba(logo_path, int(width * 0.56), int(height * 0.32))
         if logo is not None:
             lh, lw = logo.shape[:2]
             x = (width - lw) // 2
@@ -295,7 +426,7 @@ def render_end_card_image(brand: dict, width: int, height: int, dest: Path) -> P
                 canvas[y:y + lh, x:x + lw] = (alpha * bgr + (1 - alpha) * roi).astype(np.uint8)
             else:
                 canvas[y:y + lh, x:x + lw] = logo
-            y += lh + int(64 * scale)
+            y += lh + int(56 * scale)
 
     def put_centered(text, font_scale, color, thickness):
         nonlocal y
@@ -303,14 +434,14 @@ def render_end_card_image(brand: dict, width: int, height: int, dest: Path) -> P
         x = max(20, (width - size[0]) // 2)
         bgr = (color[2], color[1], color[0])
         cv2.putText(canvas, text, (x, y + size[1]), font, font_scale, bgr, thickness, cv2.LINE_AA)
-        y += size[1] + int(52 * scale)
+        y += size[1] + int(44 * scale)
 
     if copy["name"]:
-        put_centered(copy["name"].upper()[:42], 3.2 * scale, NAME_COLOR, 7)
+        put_centered(copy["name"][:42], 2.8 * scale, NAME_COLOR, 5)
     if copy["secondary"]:
-        put_centered(copy["secondary"][:48], 1.85 * scale, MUTED, 4)
+        put_centered(_short_tagline(copy["secondary"])[:48], 1.3 * scale, MUTED, 2)
     if copy["tertiary"]:
-        put_centered(copy["tertiary"][:48], 2.15 * scale, WEBSITE_COLOR, 4)
+        put_centered(copy["tertiary"][:48], 1.45 * scale, NAME_COLOR, 3)
     cv2.imwrite(str(dest), canvas)
     return dest
 

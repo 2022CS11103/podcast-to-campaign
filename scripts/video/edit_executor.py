@@ -41,9 +41,11 @@ from scripts.video.subtitle_generator import ass_time, cue_lines, split_cues
 from scripts.video.render_shorts import ffmpeg_subtitles_path
 from scripts.video.reframe import crop_origin, probe_size, speaker_x
 from scripts.video.broll import render_card
-from utils.sentences import flatten_words, is_cut_point, snap_window
+from utils.sentences import flatten_words, is_cut_point, snap_window, trim_to_max_duration, fit_conversation_window
+from config.platform_specs import MASTER_CLIP_MAX_SECONDS, SHORTS_PLATFORM_MAX_SECONDS
 from config.show_style import load_resolved
 from utils.show_detect import caption_words, gap_is_reaction
+from utils.brand_settings import load_brand
 
 MAX_PIECES = 8
 MIN_PIECE = MIN_SHOT_SECONDS
@@ -113,13 +115,48 @@ def word_spans(segments, start, end):
 
 def limit_ranges(ranges, max_ranges):
     """Bound the shot count by merging the tightest gaps, never by dropping speech."""
-    rows = [list(r) for r in ranges]
+    rows = [list(r) for r in _normalize_ranges(ranges)]
     while len(rows) > max_ranges:
         gaps = [(rows[i + 1][0] - rows[i][1], i) for i in range(len(rows) - 1)]
         _, i = min(gaps)
         rows[i][1] = rows[i + 1][1]
         del rows[i + 1]
     return [tuple(r) for r in rows]
+
+
+def _normalize_ranges(ranges):
+    """Sort in source time and merge overlaps so concat never replays the same moment."""
+    cleaned = []
+    for a, b in sorted((float(a), float(b)) for a, b in (ranges or [])):
+        if b - a < MIN_PIECE:
+            continue
+        if not cleaned:
+            cleaned.append([a, b])
+            continue
+        gap = a - cleaned[-1][1]
+        if a <= cleaned[-1][1] + 0.08:
+            cleaned[-1][1] = max(cleaned[-1][1], b)
+        elif gap < 0.45:
+            cleaned[-1][1] = b
+        else:
+            cleaned.append([a, b])
+    return [tuple(row) for row in cleaned]
+
+
+def _continuous_ranges(ranges, allow_jump_cuts=False):
+    """Prefer one uninterrupted conversation block over stitched beats."""
+    rows = _normalize_ranges(ranges)
+    if not rows:
+        return rows
+    if allow_jump_cuts or len(rows) == 1:
+        return rows
+    covered = sum(b - a for a, b in rows)
+    span = rows[-1][1] - rows[0][0]
+    if span <= 0:
+        return rows
+    if covered / span >= 0.78:
+        return [(rows[0][0], rows[-1][1])]
+    return rows
 
 
 def _filler_key(token: str) -> str:
@@ -195,10 +232,12 @@ def speech_ranges(clip, segments, min_gap, breath=0.0, max_ranges=None, keep_tai
         merged = [(a, b) for a, b in merged]
 
     if merged[0][0] - start < 0.28:
-        merged = [(start, merged[0][1]), *merged[1:]]
+        snapped_start, _ = snap_window(start, merged[0][1], segments)
+        merged = [(snapped_start, merged[0][1]), *merged[1:]]
     tail = end - merged[-1][1]
     if keep_tail or tail < 0.28 or gap_is_reaction(rms_series, merged[-1][1], end):
-        merged = [*merged[:-1], (merged[-1][0], end)]
+        _, snapped_end = snap_window(merged[-1][0], end, segments)
+        merged = [*merged[:-1], (merged[-1][0], snapped_end)]
     merged = [(a, b) for a, b in merged if b - a >= MIN_PIECE] or [(start, end)]
     if max_ranges:
         merged = limit_ranges(merged, max_ranges)
@@ -833,6 +872,16 @@ def plan_window(clip, plan, segments=None):
     extra = float(plan.get("reaction_hold") or 0)
     if extra >= 0.5:
         t1 += extra
+        _, t1 = snap_window(t0, t1, segments)
+    show = load_resolved()
+    if show.get("id") == "interview":
+        t0, t1 = fit_conversation_window(
+            t0, t1, segments, max_seconds=MASTER_CLIP_MAX_SECONDS, min_seconds=MIN_PIECE * 2
+        )
+    else:
+        t0, t1 = trim_to_max_duration(
+            t0, t1, segments, max_seconds=MASTER_CLIP_MAX_SECONDS, min_seconds=MIN_PIECE * 2
+        )
     return t0, t1
 
 
@@ -842,10 +891,13 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
     profile = profile_for(pace)
     show = load_resolved()
     keep_tail = bool(show.get("keep_reactions") or plan.get("reaction_hold"))
+    allow_jump_cuts = bool(show.get("drop_silences")) and show.get("id") != "interview"
     order = plan.get("shot_order") or []
+    if show.get("id") == "interview":
+        order = []
     if order:
         ranges = []
-        for shot in order:
+        for shot in sorted(order, key=lambda s: float(s.get("src_start") or 0)):
             part = speech_ranges(
                 {"start": shot["src_start"], "end": shot["src_end"]},
                 segments,
@@ -856,8 +908,8 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
                 drop_fillers=bool(plan.get("drop_fillers", True)),
             )
             ranges.extend(part)
-        ranges = ranges or [(start, end)]
-    elif plan.get("drop_silences", True):
+        ranges = _continuous_ranges(_normalize_ranges(ranges or [(start, end)]), allow_jump_cuts)
+    elif plan.get("drop_silences", True) and allow_jump_cuts:
         ranges = speech_ranges(
             {"start": start, "end": end},
             segments,
@@ -868,8 +920,10 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
             rms_series=rms_series,
             drop_fillers=bool(plan.get("drop_fillers", True)),
         )
+        ranges = _continuous_ranges(_normalize_ranges(ranges), allow_jump_cuts=True)
     else:
         ranges = [(start, end)]
+    ranges = _normalize_ranges(ranges) or [(start, end)]
     src_size = probe_size(Path(source))
     # Contain layout ignores punch-in zoom, so extra shot splits only
     # multiply ffmpeg time. Face-follow is also unused on contain.
@@ -877,7 +931,7 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
         {"src_start": a, "src_end": b, "zoom": 1.0, "follow_x": 0.5}
         for a, b in ranges
     ]
-    if len(pieces) > 4:
+    if len(pieces) > 4 and allow_jump_cuts:
         head, tail = pieces[0], pieces[-1]
         mid = pieces[1:-1]
         step = max(1, len(mid) // 2) if mid else 1
@@ -927,7 +981,8 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
     )
     final = output_dir / f"short_{index}.mp4"
     burned = False
-    if packed:
+    captions_on = load_brand().get("on_screen_captions_enabled", True)
+    if packed and captions_on:
         try:
             burn_captions(staged, ass, final)
             burned = True
@@ -945,7 +1000,11 @@ def execute_clip(source, clip, plan, segments, index, output_dir, scratch_root, 
                     _say(f"    drawtext captions failed: {str(draw_exc)[-240:]}")
     if burned:
         _say(f"    burned {len(packed)} caption cue(s) onto the short")
+    elif not captions_on:
+        shutil.copy2(staged, final)
+        _say("    on-screen captions off — clip exported without burned subtitles")
     else:
+        shutil.copy2(staged, final)
         _say("    WARNING: short has no on-screen captions")
         shutil.copy2(nosub, final)
     shutil.rmtree(scratch, ignore_errors=True)

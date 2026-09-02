@@ -31,9 +31,10 @@ DEFAULTS = {
     "end_screen_duration": 3,
     "end_screen_template": "logo_name_website",
     "end_screen_cta": "",
+    "on_screen_captions_enabled": True,
 }
 
-BOOLEAN_KEYS = {"end_screen_enabled"}
+BOOLEAN_KEYS = {"end_screen_enabled", "on_screen_captions_enabled"}
 INT_KEYS = {"end_screen_duration", "campaign_duration_days"}
 
 

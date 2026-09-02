@@ -105,15 +105,22 @@ USABLE_SCORE_FLOOR = 48
 # without copying the exact same cut into multiple slots.
 MAX_UNIQUE_RENDERS = 12
 
-# Transcribe/score the talk in slices. Stop as soon as enough
-# unique clips clear MIN_OVERALL_SCORE — no need to parse a full hour.
+# Transcribe/score the talk in slices. Keep going until we have enough
+# high-score clips for the requested Reels + Shorts count.
 SCAN_WINDOW_SECONDS = 60
 # Overlap so a sentence that straddles a chunk edge is not chopped in half.
 SCAN_OVERLAP_SECONDS = 6
-# Stop as soon as we have a package — but not if the opening was junk.
-MAX_SCAN_SECONDS = 360
-# Keep walking later chunks until we find usable moments, then quit.
-HARD_MAX_SCAN_SECONDS = 360
+# Absolute safety cap only — scan the full source unless we already hit quota.
+HARD_MAX_SCAN_SECONDS = 3600
+
+# Main clip must leave room for the brand end card inside platform limits.
+SHORTS_PLATFORM_MAX_SECONDS = 60
+REELS_PLATFORM_MAX_SECONDS = 45
+END_SCREEN_BUFFER_SECONDS = 3
+SHORTS_CONTENT_MAX_SECONDS = SHORTS_PLATFORM_MAX_SECONDS - END_SCREEN_BUFFER_SECONDS
+REELS_CONTENT_MAX_SECONDS = REELS_PLATFORM_MAX_SECONDS - END_SCREEN_BUFFER_SECONDS
+# One master render is copied to Shorts + Reels — cap at the Shorts body limit.
+MASTER_CLIP_MAX_SECONDS = SHORTS_CONTENT_MAX_SECONDS
 
 # Picture energy is skipped during scan so Whisper can finish a chunk
 # and score it immediately. Caption/zoom still use the transcript.

@@ -151,6 +151,25 @@ def _probe_media(path: Path):
         return None, None, None
 
 
+def _source_marker() -> Path:
+    return PROJECT_ROOT / "input" / ".source_url"
+
+
+def local_video_for_url(url: str) -> Path | None:
+    """Return input/video.mp4 when it already matches this YouTube link."""
+    canonical = canonical_youtube_url(url)
+    dest = PROJECT_ROOT / "input" / "video.mp4"
+    marker = _source_marker()
+    if not dest.exists() or dest.stat().st_size < 500_000:
+        return None
+    if marker.exists():
+        saved = marker.read_text(encoding="utf-8", errors="replace").strip()
+        if saved and saved != canonical:
+            return None
+    ok, _ = _media_ok(dest)
+    return dest if ok else None
+
+
 def _media_ok(path: Path, expected_duration=None):
     duration, width, height = _probe_media(path)
     if not duration:
@@ -371,7 +390,7 @@ def download_video(url):
             print(f"{label} produced a thin file ({why}) - trying next method...")
             last_error = RuntimeError(why)
             thin_keep = input_dir / "_thin_backup.mp4"
-            shutil.copy2(output_path, thin_keep)
+            shutil.copy(output_path, thin_keep)
             _clear_partials(input_dir, output_path)
 
     if not output_path.exists() and thin_keep and thin_keep.exists():
@@ -390,6 +409,7 @@ def download_video(url):
             raise RuntimeError(f"DOWNLOAD FAILED: {last_error}") from last_error
         raise FileNotFoundError(f"Expected {output_path} after download")
 
+    _source_marker().write_text(url, encoding="utf-8")
     return output_path
 
 

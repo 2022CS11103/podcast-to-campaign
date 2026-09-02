@@ -71,20 +71,22 @@ PROFILES = {
         "label": "Insight interview",
         "pace": "medium",
         "goal": "educational",
-        "drop_silences": True,
+        "drop_silences": False,
         "keep_reactions": False,
         "reaction_hold": 0.35,
-        "hook_first": True,
+        "hook_first": False,
         "keyword_boost": True,
         "caption_style": "hormozi",
         "layout": "center",
         "rules": (
             "This is a conversational interview. Hunt bold claims, not laughter.\n"
-            "- Open on the most shocking sentence, even if it happens later in the window.\n"
-            "- Then rewind into the context of how it happened.\n"
+            "- Play the clip once, in order — never rewind or replay the same sentence.\n"
+            "- Trim only dead air at the edges; do not stitch the same moment twice.\n"
             "- Prefer passionate monologues and high-value advice (money, mistakes, secrets).\n"
             "- Fix Hinglish and Indian numbering (lakhs, crores, dhanda) in captions.\n"
-            "- Keep both speakers' meaning; do not chop a revelation mid-thought."
+            "- Keep both speakers' meaning; do not chop a revelation mid-thought.\n"
+            "- If a clip ends on a host question, include the guest's full answer through a natural close.\n"
+            "- A highlight must make conversational sense on its own: question + answer, or a complete monologue."
         ),
     },
 }

@@ -618,6 +618,7 @@ function CampaignPage({ campaign, setCampaign }) {
         endScreenCta: current.endScreenCta || brand.end_screen_cta || "",
         endScreenTemplate: current.endScreenTemplate || brand.end_screen_template || "logo_name_website",
         endScreenDuration: current.endScreenDuration || brand.end_screen_duration || 3,
+        onScreenCaptionsEnabled: current.onScreenCaptionsEnabled ?? brand.on_screen_captions_enabled !== false,
       }));
     }).catch(() => {});
   }, [setCampaign]);
@@ -775,6 +776,7 @@ function CampaignPage({ campaign, setCampaign }) {
             endScreenDuration: campaign.endScreenDuration || 3,
             endScreenTemplate: campaign.endScreenTemplate || "logo_name_website",
             endScreenCta: campaign.endScreenCta || "",
+            onScreenCaptionsEnabled: campaign.onScreenCaptionsEnabled !== false,
             hasLogo: Boolean(campaign.hasLogo),
             logoCache: campaign.logoCache,
             logoName: campaign.logoName,
@@ -789,6 +791,7 @@ function CampaignPage({ campaign, setCampaign }) {
             endScreenDuration: next.endScreenDuration,
             endScreenTemplate: next.endScreenTemplate,
             endScreenCta: next.endScreenCta,
+            onScreenCaptionsEnabled: next.onScreenCaptionsEnabled,
             hasLogo: next.hasLogo,
             logoCache: next.logoCache,
             logoName: next.logoName,
@@ -1909,6 +1912,7 @@ function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign }) 
       endScreenDuration: form.endScreenDuration,
       endScreenTemplate: form.endScreenTemplate,
       endScreenCta: form.endScreenCta,
+      onScreenCaptionsEnabled: form.onScreenCaptionsEnabled,
       hasLogo: form.hasLogo,
       logoCache: form.logoCache,
     }));
@@ -2314,6 +2318,7 @@ function CreatorApp() {
           end_screen_duration: Number(campaign.endScreenDuration || savedBrand.end_screen_duration || 3),
           end_screen_template: campaign.endScreenTemplate || savedBrand.end_screen_template || "logo_name_website",
           end_screen_cta: campaign.endScreenCta || savedBrand.end_screen_cta || "",
+          on_screen_captions_enabled: campaign.onScreenCaptionsEnabled !== false,
         },
       });
       setCurrentJob(result.job_id);

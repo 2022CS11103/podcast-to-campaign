@@ -124,6 +124,12 @@ def fill_platform_slots(clips, count, platform, used_ids):
     return selected
 
 
+def overlap_ratio(a, b):
+    inter = max(0.0, min(float(a["end"]), float(b["end"])) - max(float(a["start"]), float(b["start"])))
+    union = max(float(a["end"]), float(b["end"])) - min(float(a["start"]), float(b["start"]))
+    return inter / union if union else 0.0
+
+
 def assign_distinct_video_slots(clips, plan):
     """
     Round-robin Shorts / Reels / TikTok onto distinct cuts only.
@@ -138,6 +144,7 @@ def assign_distinct_video_slots(clips, plan):
     remaining = {p: int(plan[p]["count"]) for p in platforms}
     used_on = {p: set() for p in platforms}
     assigned_ids = set()
+    assigned_clips = []
     picks = {p: [] for p in platforms}
 
     def _rank(pool, platform):
@@ -145,8 +152,13 @@ def assign_distinct_video_slots(clips, plan):
 
     def best_for(platform):
         unused_global = [c for c in clips if c.get("chunk_id") not in assigned_ids]
-        if unused_global:
-            return _rank(unused_global, platform)[0], False
+        distinct = [
+            c for c in unused_global
+            if not any(overlap_ratio(c, picked) > 0.35 for picked in assigned_clips)
+        ]
+        pool = distinct or unused_global
+        if pool:
+            return _rank(pool, platform)[0], False
         return None, False
 
     while any(remaining[p] > 0 for p in platforms):
@@ -160,6 +172,7 @@ def assign_distinct_video_slots(clips, plan):
             picks[platform].append((clip, False))
             used_on[platform].add(clip.get("chunk_id"))
             assigned_ids.add(clip.get("chunk_id"))
+            assigned_clips.append(clip)
             remaining[platform] -= 1
             progressed = True
         if not progressed:
