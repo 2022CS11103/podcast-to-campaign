@@ -11,7 +11,7 @@ from agents.orchestrator import CreatorOS
 from api.job_manager import job_manager
 from utils.cost_tracker import generate_report, reset_log
 from utils.content_plan import plan_is_usable, normalize_plan
-from utils.brand_settings import merge_and_save
+from utils.brand_settings import merge_and_save, load_brand
 from utils.pipeline_timer import reset as reset_timer, log_step, finish, snapshot, format_duration
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -105,10 +105,15 @@ def _run_script(script: str):
 
 def _route_and_brand():
     _run_script("scripts/ai/platform_router.py")
+    brand = load_brand()
+    if not brand.get("end_screen_enabled"):
+        print("⚠️  Brand end screen is OFF in brand_context.json — clips will have no outro.")
+        print("   Turn on “Add end screen” in Campaign branding and generate again.")
+        return
     try:
         _run_script("scripts/video/brand_end_screen.py")
     except Exception as exc:
-        print(f"⚠️  Brand end screen skipped: {exc}")
+        print(f"⚠️  Brand end screen failed: {exc}")
         print("   Original generated clips were left unchanged.")
 
 

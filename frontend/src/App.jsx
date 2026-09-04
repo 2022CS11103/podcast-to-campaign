@@ -612,9 +612,16 @@ function CampaignPage({ campaign, setCampaign }) {
     creatorApi.getBrand().then((brand) => {
       setCampaign((current) => ({
         ...current,
+        brandName: current.brandName && current.brandName !== "CreatorOS"
+          ? current.brandName
+          : (brand.brand_name || current.brandName || ""),
+        website: current.website || brand.website || "",
         hasLogo: Boolean(brand.has_logo),
         logoCache: Date.now(),
         tagline: current.tagline || brand.tagline || "",
+        endScreenEnabled: Boolean(
+          current.endScreenEnabled || brand.end_screen_enabled
+        ),
         endScreenCta: current.endScreenCta || brand.end_screen_cta || "",
         endScreenTemplate: current.endScreenTemplate || brand.end_screen_template || "logo_name_website",
         endScreenDuration: current.endScreenDuration || brand.end_screen_duration || 3,
@@ -2298,28 +2305,36 @@ function CreatorApp() {
         savedBrand = {};
       }
       const { has_logo: _hasLogo, logo_url: _logoUrl, ...brandRest } = savedBrand;
+      const endScreenOn = Boolean(campaign.endScreenEnabled);
+      const brandPayload = {
+        ...brandRest,
+        brand_name: campaign.brandName,
+        website: campaign.website,
+        tagline: campaign.tagline || savedBrand.tagline || "",
+        goal: campaign.goal,
+        audience: campaign.audience,
+        tone: campaign.tone,
+        show_type: campaign.showType || "auto",
+        campaign_duration_days: campaign.durationDays,
+        campaign_start_date: campaign.startDate,
+        logo_path: savedBrand.logo_path || "",
+        end_screen_enabled: endScreenOn,
+        end_screen_duration: Number(campaign.endScreenDuration || savedBrand.end_screen_duration || 3),
+        end_screen_template: campaign.endScreenTemplate || savedBrand.end_screen_template || "logo_name_website",
+        end_screen_cta: campaign.endScreenCta || savedBrand.end_screen_cta || "",
+        on_screen_captions_enabled: campaign.onScreenCaptionsEnabled !== false,
+      };
+      // Save before queueing so the worker always reads the toggle the user sees.
+      try {
+        await creatorApi.saveBrand(brandPayload);
+      } catch {
+        /* brand_context on the job is the source of truth below */
+      }
       const result = await creatorApi.startCampaign({
         source: campaign.source,
         campaign_start_date: campaign.startDate,
         content_plan: contentPlan,
-        brand_context: {
-          ...brandRest,
-          brand_name: campaign.brandName,
-          website: campaign.website,
-          tagline: campaign.tagline || savedBrand.tagline || "",
-          goal: campaign.goal,
-          audience: campaign.audience,
-          tone: campaign.tone,
-          show_type: campaign.showType || "auto",
-          campaign_duration_days: campaign.durationDays,
-          campaign_start_date: campaign.startDate,
-          logo_path: savedBrand.logo_path || "",
-          end_screen_enabled: Boolean(campaign.endScreenEnabled),
-          end_screen_duration: Number(campaign.endScreenDuration || savedBrand.end_screen_duration || 3),
-          end_screen_template: campaign.endScreenTemplate || savedBrand.end_screen_template || "logo_name_website",
-          end_screen_cta: campaign.endScreenCta || savedBrand.end_screen_cta || "",
-          on_screen_captions_enabled: campaign.onScreenCaptionsEnabled !== false,
-        },
+        brand_context: brandPayload,
       });
       setCurrentJob(result.job_id);
       navigate(`/processing/${result.job_id}`);
