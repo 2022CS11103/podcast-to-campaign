@@ -13,9 +13,5 @@
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {
-    "dotenv": "^16.6.1",
-    "express": "^4.21.2",
-    "stripe": "^18.5.0"
-  }
+  "dependencies": {}
 }

@@ -1,22 +1,23 @@
 /**
- * creatorOS paywall — independent one-pager with Stripe subscriptions.
+ * creatorOS paywall — zero-dependency Node server (same shape as proxy.js).
  *
- *   cd paywall
- *   npm install
- *   cp .env.example .env    # add STRIPE_SECRET_KEY
- *   npm start               # or: pm2 start ecosystem.config.cjs
+ *   pm2 delete creatoros-paywall
+ *   pm2 start paywall/index.js --name creatoros-paywall
  *
- * Listens on port 8000. Does not start the Python studio.
+ * Listens on 127.0.0.1:8000 so nginx / p2m can proxy to it.
  */
+const fs = require("fs");
+const http = require("http");
+const https = require("https");
 const path = require("path");
-const express = require("express");
-const Stripe = require("stripe");
-
-require("dotenv").config({ path: path.join(__dirname, ".env") });
-require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const PORT = Number(process.env.PORT || 8000);
+const HOST = process.env.HOST || "127.0.0.1";
 const PUBLIC_DIR = path.join(__dirname, "public");
+
+loadEnv(path.join(__dirname, ".env"));
+loadEnv(path.join(__dirname, "..", ".env"));
+
 const TRIAL_DAYS = Math.max(0, Number(process.env.STRIPE_TRIAL_DAYS || 7));
 
 const PLANS = {
@@ -26,13 +27,6 @@ const PLANS = {
     tagline: "A light cadence from a couple of source videos.",
     monthly: 2900,
     yearly: 29000,
-    features: [
-      "2 source videos each month",
-      "YouTube Shorts and Instagram Reels",
-      "14-day content calendar",
-      "Captions burned into every cut",
-      "Email support",
-    ],
   },
   creator: {
     id: "creator",
@@ -41,14 +35,6 @@ const PLANS = {
     tagline: "One video in. A month of content across every channel.",
     monthly: 8900,
     yearly: 89000,
-    features: [
-      "12 source videos each month",
-      "Shorts, Reels, LinkedIn, and X",
-      "30-day calendar with pause and skip",
-      "Platform-specific copy, not copy-paste",
-      "Brand end screens and logo",
-      "Priority email support",
-    ],
   },
   studio: {
     id: "studio",
@@ -56,32 +42,40 @@ const PLANS = {
     tagline: "Unlimited runs for teams that ship every week.",
     monthly: 19900,
     yearly: 199000,
-    features: [
-      "Unlimited source videos",
-      "Everything in Creator",
-      "Multiple workspaces and brands",
-      "Priority processing queue",
-      "Shared calendar control",
-      "Onboarding call",
-    ],
   },
 };
 
-function envKey(planId, interval, kind) {
-  return `STRIPE_${kind}_${planId.toUpperCase()}_${interval.toUpperCase() === "year" ? "YEARLY" : "MONTHLY"}`;
-}
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".webp": "image/webp",
+  ".json": "application/json; charset=utf-8",
+};
 
-function publicOrigin(req) {
-  const configured = String(process.env.PUBLIC_URL || "").replace(/\/$/, "");
-  if (configured) return configured;
-  const host = req.get("host") || `127.0.0.1:${PORT}`;
-  return `${req.protocol}://${host}`;
-}
-
-function stripeClient() {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) return null;
-  return new Stripe(key);
+function loadEnv(file) {
+  if (!fs.existsSync(file)) return;
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq < 1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    if (process.env[key] != null) continue;
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
 }
 
 function stripeMode() {
@@ -91,41 +85,154 @@ function stripeMode() {
   return key ? "unknown" : "off";
 }
 
-const app = express();
-app.set("trust proxy", 1);
-app.use(express.json({ limit: "32kb" }));
-app.use(express.static(PUBLIC_DIR, { index: false, maxAge: "1h" }));
+function envKey(planId, interval, kind) {
+  return `STRIPE_${kind}_${planId.toUpperCase()}_${interval === "year" ? "YEARLY" : "MONTHLY"}`;
+}
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "creatoros-paywall", stripe: stripeMode() });
-});
-
-app.get("/api/plans", (_req, res) => {
-  res.json({
-    trialDays: TRIAL_DAYS,
-    stripe: stripeMode(),
-    plans: Object.values(PLANS),
+function send(res, status, body, headers) {
+  const payload = Buffer.from(body);
+  res.writeHead(status, {
+    "Content-Length": payload.length,
+    ...headers,
   });
-});
+  res.end(payload);
+}
 
-app.post("/api/checkout", async (req, res) => {
-  const planId = String(req.body?.plan || "").toLowerCase();
-  const interval = req.body?.interval === "year" ? "year" : "month";
+function sendJson(res, status, data) {
+  send(res, status, JSON.stringify(data), {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+}
+
+function sendFile(res, filePath) {
+  const resolved = path.resolve(filePath);
+  if (!resolved.startsWith(path.resolve(PUBLIC_DIR))) {
+    send(res, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" });
+    return;
+  }
+  fs.readFile(resolved, (err, data) => {
+    if (err) {
+      send(res, 404, "Not found", { "Content-Type": "text/plain; charset=utf-8" });
+      return;
+    }
+    send(res, 200, data, {
+      "Content-Type": MIME[path.extname(resolved)] || "application/octet-stream",
+      "Cache-Control": path.extname(resolved) === ".html" ? "no-store" : "public, max-age=3600",
+    });
+  });
+}
+
+function publicOrigin(req) {
+  const configured = String(process.env.PUBLIC_URL || "").replace(/\/$/, "");
+  if (configured) return configured;
+  const host = req.headers["x-forwarded-host"] || req.headers.host || `${HOST}:${PORT}`;
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  return `${proto}://${host}`;
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > 32 * 1024) {
+        reject(new Error("body too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", reject);
+  });
+}
+
+function encodeForm(data, prefix) {
+  const parts = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (value == null || value === false) continue;
+    const name = prefix ? `${prefix}[${key}]` : key;
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => {
+        if (item && typeof item === "object") parts.push(encodeForm(item, `${name}[${index}]`));
+        else parts.push(`${encodeURIComponent(`${name}[${index}]`)}=${encodeURIComponent(String(item))}`);
+      });
+    } else if (typeof value === "object") {
+      parts.push(encodeForm(value, name));
+    } else if (value === true) {
+      parts.push(`${encodeURIComponent(name)}=true`);
+    } else {
+      parts.push(`${encodeURIComponent(name)}=${encodeURIComponent(String(value))}`);
+    }
+  }
+  return parts.filter(Boolean).join("&");
+}
+
+function stripeRequest(method, apiPath, form) {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) return Promise.reject(new Error("missing Stripe key"));
+  const body = form ? encodeForm(form) : "";
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: "api.stripe.com",
+        path: apiPath,
+        method,
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Length": Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          let json = {};
+          try {
+            json = JSON.parse(text);
+          } catch {
+            json = { error: { message: text || "Stripe returned an empty response" } };
+          }
+          if (res.statusCode >= 400) {
+            reject(new Error(json.error?.message || `Stripe HTTP ${res.statusCode}`));
+            return;
+          }
+          resolve(json);
+        });
+      },
+    );
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
+async function checkout(req, res) {
+  let payload = {};
+  try {
+    payload = JSON.parse((await readBody(req)) || "{}");
+  } catch {
+    sendJson(res, 400, { error: "Invalid checkout request." });
+    return;
+  }
+  const planId = String(payload.plan || "").toLowerCase();
+  const interval = payload.interval === "year" ? "year" : "month";
   const plan = PLANS[planId];
   if (!plan) {
-    res.status(400).json({ error: "Choose a Starter, Creator, or Studio plan." });
+    sendJson(res, 400, { error: "Choose a Starter, Creator, or Studio plan." });
     return;
   }
 
   const paymentLink = process.env[envKey(planId, interval, "LINK")];
   if (paymentLink) {
-    res.json({ url: paymentLink });
+    sendJson(res, 200, { url: paymentLink });
     return;
   }
-
-  const stripe = stripeClient();
-  if (!stripe) {
-    res.status(503).json({
+  if (!process.env.STRIPE_SECRET_KEY) {
+    sendJson(res, 503, {
       error: "Checkout is not configured yet. Add STRIPE_SECRET_KEY or a Stripe Payment Link.",
     });
     return;
@@ -135,56 +242,54 @@ app.post("/api/checkout", async (req, res) => {
   const priceId = process.env[envKey(planId, interval, "PRICE")];
   const amount = interval === "year" ? plan.yearly : plan.monthly;
   const label = interval === "year" ? `${plan.name} · yearly` : `${plan.name} · monthly`;
+  const form = {
+    mode: "subscription",
+    allow_promotion_codes: "true",
+    billing_address_collection: "auto",
+    success_url: `${origin}/success.html?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/#pricing`,
+    metadata: { plan: plan.id, interval, product: "creatorOS" },
+    subscription_data: {
+      metadata: { plan: plan.id, interval },
+      ...(TRIAL_DAYS > 0 ? { trial_period_days: TRIAL_DAYS } : {}),
+    },
+    line_items: [
+      priceId
+        ? { quantity: 1, price: priceId }
+        : {
+            quantity: 1,
+            price_data: {
+              currency: "usd",
+              unit_amount: amount,
+              recurring: { interval },
+              product_data: {
+                name: `creatorOS ${label}`,
+                description: plan.tagline,
+              },
+            },
+          },
+    ],
+  };
 
   try {
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      allow_promotion_codes: true,
-      billing_address_collection: "auto",
-      success_url: `${origin}/success.html?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/#pricing`,
-      metadata: { plan: plan.id, interval, product: "creatorOS" },
-      subscription_data: {
-        metadata: { plan: plan.id, interval },
-        ...(TRIAL_DAYS > 0 ? { trial_period_days: TRIAL_DAYS } : {}),
-      },
-      line_items: [
-        {
-          quantity: 1,
-          ...(priceId
-            ? { price: priceId }
-            : {
-                price_data: {
-                  currency: "usd",
-                  unit_amount: amount,
-                  recurring: { interval },
-                  product_data: {
-                    name: `creatorOS ${label}`,
-                    description: plan.tagline,
-                  },
-                },
-              }),
-        },
-      ],
-    });
-    res.json({ url: session.url });
+    const session = await stripeRequest("POST", "/v1/checkout/sessions", form);
+    sendJson(res, 200, { url: session.url });
   } catch (error) {
     console.error("Stripe checkout failed:", error.message);
-    res.status(502).json({ error: "Stripe could not start checkout. Check the API key and try again." });
+    sendJson(res, 502, { error: "Stripe could not start checkout. Check the API key and try again." });
   }
-});
+}
 
-app.get("/api/session", async (req, res) => {
-  const id = String(req.query.session_id || "");
-  const stripe = stripeClient();
-  if (!stripe || !id.startsWith("cs_")) {
-    res.json({ ok: false });
+async function sessionLookup(req, res, url) {
+  const id = String(url.searchParams.get("session_id") || "");
+  if (!process.env.STRIPE_SECRET_KEY || !id.startsWith("cs_")) {
+    sendJson(res, 200, { ok: false });
     return;
   }
   try {
-    const session = await stripe.checkout.sessions.retrieve(id);
+    const session = await stripeRequest("GET", `/v1/checkout/sessions/${encodeURIComponent(id)}`);
     const plan = PLANS[session.metadata?.plan] || null;
-    res.json({
+    sendJson(res, 200, {
       ok: session.status === "complete" || session.payment_status === "paid" || session.status === "open",
       email: session.customer_details?.email || session.customer_email || "",
       plan: plan ? plan.name : session.metadata?.plan || "",
@@ -192,26 +297,60 @@ app.get("/api/session", async (req, res) => {
     });
   } catch (error) {
     console.error("Stripe session lookup failed:", error.message);
-    res.json({ ok: false });
+    sendJson(res, 200, { ok: false });
   }
-});
+}
 
-app.get(["/", "/app", "/app/", "/login", "/signup"], (_req, res) => {
-  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
-});
+function handler(req, res) {
+  const url = new URL(req.url || "/", `http://${req.headers.host || `${HOST}:${PORT}`}`);
+  const route = url.pathname.replace(/\/+$/, "") || "/";
 
-app.use((req, res, next) => {
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    next();
+  if (req.method === "GET" && route === "/health") {
+    sendJson(res, 200, { status: "ok", service: "creatoros-paywall", stripe: stripeMode(), port: PORT });
     return;
   }
-  if (req.path.includes(".")) {
-    next();
+  if (req.method === "GET" && route === "/api/plans") {
+    sendJson(res, 200, { trialDays: TRIAL_DAYS, stripe: stripeMode(), plans: Object.values(PLANS) });
     return;
   }
-  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
-});
+  if (req.method === "POST" && route === "/api/checkout") {
+    checkout(req, res).catch((error) => {
+      console.error(error);
+      sendJson(res, 500, { error: "Checkout failed." });
+    });
+    return;
+  }
+  if (req.method === "GET" && route === "/api/session") {
+    sessionLookup(req, res, url).catch((error) => {
+      console.error(error);
+      sendJson(res, 200, { ok: false });
+    });
+    return;
+  }
+  if (req.method === "GET" || req.method === "HEAD") {
+    if (route === "/" || route === "/app" || route === "/login" || route === "/signup") {
+      sendFile(res, path.join(PUBLIC_DIR, "index.html"));
+      return;
+    }
+    const relative = decodeURIComponent(url.pathname);
+    const filePath = path.join(PUBLIC_DIR, relative);
+    fs.stat(filePath, (err, stat) => {
+      if (!err && stat.isFile()) {
+        sendFile(res, filePath);
+        return;
+      }
+      sendFile(res, path.join(PUBLIC_DIR, "index.html"));
+    });
+    return;
+  }
+  send(res, 405, "Method not allowed", { "Content-Type": "text/plain; charset=utf-8" });
+}
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`creatorOS paywall  http://0.0.0.0:${PORT}  stripe=${stripeMode()}`);
+const server = http.createServer(handler);
+server.on("error", (error) => {
+  console.error(`Paywall failed to bind http://${HOST}:${PORT}:`, error.message);
+  process.exit(1);
+});
+server.listen(PORT, HOST, () => {
+  console.log(`creatorOS paywall listening on http://${HOST}:${PORT}  stripe=${stripeMode()}`);
 });
