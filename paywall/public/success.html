@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#09090B" />
+    <title>You’re in — creatorOS</title>
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="success-body">
+    <div class="bg-grid" aria-hidden="true"></div>
+    <main class="success-card">
+      <img src="/logo.png" alt="creatorOS" width="52" height="52" />
+      <p class="eyebrow">Subscription confirmed</p>
+      <h1>You’re in.</h1>
+      <p class="lede" id="success-copy">
+        Checkout completed. We’re provisioning your creatorOS workspace and will email next steps to the address you used with Stripe.
+      </p>
+      <ul class="hero-points">
+        <li>Trial starts today — cancel any time in Stripe before it ends</li>
+        <li>Your plan unlocks the studio when the workspace is ready</li>
+        <li>Keep this tab for your records</li>
+      </ul>
+      <a class="primary-btn lg" href="/#pricing">Back to creatorOS</a>
+    </main>
+    <script>
+      (async () => {
+        const params = new URLSearchParams(location.search);
+        const sessionId = params.get("session_id");
+        if (!sessionId) return;
+        try {
+          const res = await fetch(`/api/session?session_id=${encodeURIComponent(sessionId)}`);
+          const data = await res.json();
+          if (!data.ok) return;
+          const who = data.email ? ` at ${data.email}` : "";
+          const plan = data.plan ? ` You’re on ${data.plan}${data.interval === "year" ? " yearly" : ""}.` : "";
+          document.getElementById("success-copy").textContent =
+            `Checkout completed${who}.${plan} We’re provisioning your workspace and will follow up at that address.`;
+        } catch {
+          /* keep default copy */
+        }
+      })();
+    </script>
+  </body>
+</html>
