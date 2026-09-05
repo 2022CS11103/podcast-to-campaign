@@ -13,7 +13,7 @@
     "marketing_completed": true,
     "edit_quality": {
         "average_score": 100,
-        "passed": 8,
+        "passed": 2,
         "failed": 0
     }
 }

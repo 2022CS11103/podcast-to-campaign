@@ -1,5 +1,5 @@
 {
-  "brand_name": "Radiant Minds",
+  "brand_name": "Radiant Minds, MA",
   "website": "radiantmindsma.com",
   "tagline": "Renew Strength and Resilience",
   "goal": "Brand awareness",
@@ -12,5 +12,6 @@
   "end_screen_enabled": true,
   "end_screen_duration": 3,
   "end_screen_template": "logo_name_website",
-  "end_screen_cta": ""
+  "end_screen_cta": "",
+  "on_screen_captions_enabled": true
 }
