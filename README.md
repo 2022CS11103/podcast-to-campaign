@@ -3,6 +3,9 @@ source .venv/bin/activate
 export PYTHONIOENCODING=utf-8
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 
+
+git push adigit
+
 # CreatorOS
 
 **One video. A month of content.**
