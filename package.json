@@ -11,6 +11,7 @@
     "setup:env": "node -e \"const fs=require('fs'); if (fs.existsSync('.env')) { console.log('.env already exists'); process.exit(0); } fs.writeFileSync('.env', 'GEMINI_API_KEY=\\nFRONTEND_URL=http://127.0.0.1:8000/app\\n'); console.log('Created .env — add your GEMINI_API_KEY');\"",
     "build": "pnpm --dir frontend run build",
     "start": "PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 .venv/bin/python -m uvicorn api.main:app --host 0.0.0.0 --port 8000",
+    "start:pm2": "pnpm run pm2:start",
     "pm2:start": "pm2 start ecosystem.config.cjs --update-env",
     "pm2:stop": "pm2 stop creatoros",
     "pm2:restart": "pm2 restart creatoros --update-env"

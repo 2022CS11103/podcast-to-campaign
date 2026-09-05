@@ -13,6 +13,7 @@ module.exports = {
       instances: 1,
       exec_mode: "fork",
       env: {
+        PORT: "8000",
         PYTHONIOENCODING: "utf-8",
         PYTHONUNBUFFERED: "1",
       },
