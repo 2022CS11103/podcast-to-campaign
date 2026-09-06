@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile, Request, Header
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -24,7 +24,11 @@ from api.schemas import (
     ScopeJobRequest,
     ScheduleControlRequest,
     ScheduleStatusRequest,
+    ReviewBulkRequest,
     BrandUpdateRequest,
+    BillingCheckoutRequest,
+    BillingPortalRequest,
+    ClipDeskRequest,
 )
 from api.job_manager import job_manager
 from api.pipeline_runner import start_worker, enqueue_job
@@ -48,6 +52,18 @@ from utils.brand_settings import (
     public_brand,
     resolve_logo_path,
     save_brand,
+)
+from utils.billing import (
+    billing_enabled,
+    billing_enforced,
+    can_run_campaign,
+    construct_webhook_event,
+    create_checkout_session,
+    create_portal_session,
+    entitled_max_days,
+    handle_webhook_event,
+    normalize_email,
+    status_payload,
 )
 from utils.social_oauth import (
     all_statuses as social_account_statuses,
@@ -115,7 +131,7 @@ UPLOAD_DIR = PROJECT_ROOT / "input" / "uploads"
 LOGO_MAX_BYTES = 8 * 1024 * 1024
 LOGO_TYPES = {".png", ".jpg", ".jpeg", ".webp"}
 MEDIA_FOLDERS = {
-    "final_shorts", "youtube_shorts", "instagram_reels", "tiktok", "posts",
+    "final_shorts", "youtube_shorts", "instagram_reels", "tiktok", "posts", "clip_desk",
 }
 
 def _merge_scope(current: dict, override: dict) -> dict:
@@ -155,12 +171,84 @@ def health():
 
 
 @app.get("/auth/config")
-def auth_login_config():
-    """Public Google client id for studio sign-in. Never returns the secret."""
+def auth_config():
     return {
-        "google_client_id": os.getenv("GOOGLE_CLIENT_ID", "").strip(),
-        "google_signin": bool(os.getenv("GOOGLE_CLIENT_ID", "").strip()),
+        "google_client_id": os.getenv("GOOGLE_CLIENT_ID") or "",
+        "billing_enabled": billing_enforced(),
+        "billing_preview": billing_enabled() and not billing_enforced(),
     }
+
+
+def _request_email(
+    request: Request,
+    body_email: str | None = None,
+    x_user_email: Optional[str] = Header(default=None, alias="X-User-Email"),
+) -> str:
+    return normalize_email(
+        body_email
+        or x_user_email
+        or request.headers.get("x-user-email")
+        or ""
+    )
+
+
+@app.get("/billing/status")
+def billing_status(
+    request: Request,
+    x_user_email: Optional[str] = Header(default=None, alias="X-User-Email"),
+):
+    email = _request_email(request, x_user_email=x_user_email)
+    return status_payload(email)
+
+
+@app.post("/billing/checkout")
+def billing_checkout(
+    req: BillingCheckoutRequest,
+    request: Request,
+    x_user_email: Optional[str] = Header(default=None, alias="X-User-Email"),
+):
+    email = _request_email(request, req.email, x_user_email)
+    try:
+        return create_checkout_session(
+            email,
+            req.price_id,
+            req.user_id,
+            campaign_days=req.campaign_days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/billing/portal")
+def billing_portal(
+    req: BillingPortalRequest,
+    request: Request,
+    x_user_email: Optional[str] = Header(default=None, alias="X-User-Email"),
+):
+    email = _request_email(request, req.email, x_user_email)
+    try:
+        return create_portal_session(email)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    if not billing_enforced():
+        raise HTTPException(status_code=503, detail="Billing is not enabled.")
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature")
+    try:
+        event = construct_webhook_event(payload, signature)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Webhook error: {exc}") from exc
+    if hasattr(event, "to_dict"):
+        event = event.to_dict()
+    return handle_webhook_event(event)
 
 
 @app.get("/studio")
@@ -484,8 +572,147 @@ def _decorate_board_items(raw_items):
         row["same_moment"] = bool(also_on)
         row["also_on"] = also_on
         row["package_label"] = package_label
+        reasons = item.get("review_reasons") or []
+        if not reasons:
+            seed = []
+            if item.get("highlight_reason"):
+                seed.append(item["highlight_reason"])
+            if item.get("content_angle") or item.get("detected_topic"):
+                seed.append(item.get("detected_topic") or item.get("content_angle"))
+            if item.get("editor_note"):
+                seed.append(str(item["editor_note"])[:90])
+            reasons = [r for r in seed if r][:4] or ["AI-selected highlight"]
+        row["review_reasons"] = reasons
+        row["transcript_excerpt"] = (
+            item.get("transcript_excerpt")
+            or (item.get("summary") or "")[:280]
+        )
+        row["detected_topic"] = item.get("detected_topic") or item.get("content_angle") or ""
+        row["quality"] = {
+            "overall_score": item.get("overall_score"),
+            "platform_fit_score": item.get("platform_fit_score"),
+            "word_score": item.get("word_score"),
+            "visual_score": item.get("visual_score"),
+            "audio_energy": item.get("audio_energy"),
+        }
         items.append(row)
     return items
+
+
+@app.get("/transcript")
+def get_transcript(source: Optional[str] = None):
+    """Campaign transcript, or the latest clip-desk transcript."""
+    if (source or "").strip().lower() == "campaign":
+        clean = PROJECT_ROOT / "output" / "clean_transcript.json"
+        raw = PROJECT_ROOT / "output" / "transcript.json"
+        path = clean if clean.exists() else raw if raw.exists() else None
+        if not path:
+            raise HTTPException(
+                status_code=404,
+                detail="No campaign transcript yet. Generate a campaign first.",
+            )
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        segments = data.get("segments") or []
+        text = (data.get("transcript") or "").strip()
+        if not text:
+            text = " ".join(
+                str(seg.get("text") or "").strip()
+                for seg in segments
+                if str(seg.get("text") or "").strip()
+            )
+        return {
+            "source": path.name,
+            "kind": "campaign",
+            "language": data.get("language") or data.get("lang"),
+            "duration_seconds": data.get("duration") or data.get("duration_seconds"),
+            "segment_count": len(segments),
+            "transcript": text,
+            "segments": [
+                {
+                    "start": float(seg.get("start") or 0),
+                    "end": float(seg.get("end") or 0),
+                    "text": str(seg.get("text") or "").strip(),
+                }
+                for seg in segments
+                if str(seg.get("text") or "").strip()
+            ],
+        }
+
+    from utils.clip_desk import latest_clip_transcript
+
+    clip = latest_clip_transcript()
+    if clip:
+        return {**clip, "kind": "clip_desk"}
+
+    # Fall back to campaign transcript
+    clean = PROJECT_ROOT / "output" / "clean_transcript.json"
+    raw = PROJECT_ROOT / "output" / "transcript.json"
+    path = clean if clean.exists() else raw if raw.exists() else None
+    if not path:
+        raise HTTPException(
+            status_code=404,
+            detail="No transcript yet. Use the form below to fetch a link, or run a campaign.",
+        )
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    segments = data.get("segments") or []
+    text = (data.get("transcript") or "").strip()
+    if not text:
+        text = " ".join(
+            str(seg.get("text") or "").strip()
+            for seg in segments
+            if str(seg.get("text") or "").strip()
+        )
+    return {
+        "source": path.name,
+        "kind": "campaign",
+        "language": data.get("language") or data.get("lang"),
+        "duration_seconds": data.get("duration") or data.get("duration_seconds"),
+        "segment_count": len(segments),
+        "transcript": text,
+        "segments": [
+            {
+                "start": float(seg.get("start") or 0),
+                "end": float(seg.get("end") or 0),
+                "text": str(seg.get("text") or "").strip(),
+            }
+            for seg in segments
+            if str(seg.get("text") or "").strip()
+        ],
+    }
+
+
+@app.post("/tools/fetch-clip")
+def tools_fetch_clip(req: ClipDeskRequest):
+    """Download a URL (full or timespan) without starting a campaign."""
+    from utils.clip_desk import fetch_clip
+
+    try:
+        return fetch_clip(req.url or "", start=req.start, end=req.end, job_id=req.job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/tools/transcribe-clip")
+def tools_transcribe_clip(req: ClipDeskRequest):
+    """Transcribe full video or only the selected timespan."""
+    from utils.clip_desk import transcribe_clip
+
+    try:
+        return transcribe_clip(
+            url=req.url,
+            start=req.start,
+            end=req.end,
+            mode=req.mode or "range",
+            job_id=req.job_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/campaign-board")
@@ -506,12 +733,18 @@ def campaign_board():
     if not scan and transcript_file.exists():
         with open(transcript_file, "r", encoding="utf-8") as f:
             scan = json.load(f).get("scan") or {}
+    needs_review = sum(
+        1
+        for item in items
+        if (item.get("status") or "").lower() in {"ai_generated", "pending", "draft", ""}
+    )
     return {
         "summary": summary,
         "plan": bank.get("requested_plan"),
         "total_allocated": bank.get("total_allocated", len(items)),
         "video_renders": bank.get("video_renders"),
         "videos_ready": videos_ready,
+        "needs_review_count": needs_review,
         "scan": scan,
         "analysis_mode": summary.get("analysis_mode") or (
             "audio_visual" if scan.get("visual_analysis") else "audio_first"
@@ -719,13 +952,49 @@ def disconnect_platform(platform: str):
 
 
 @app.post("/process", response_model=ProcessResponse)
-def process_video(req: ProcessRequest):
+def process_video(
+    req: ProcessRequest,
+    request: Request,
+    x_user_email: Optional[str] = Header(default=None, alias="X-User-Email"),
+):
+    email = _request_email(request, x_user_email=x_user_email)
+    brand = req.brand_context or {}
+    try:
+        campaign_days = int(brand.get("campaign_duration_days") or 30)
+    except (TypeError, ValueError):
+        campaign_days = 30
+
+    if billing_enforced() and not can_run_campaign(email, campaign_days):
+        allowed = entitled_max_days(email)
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "subscription_required",
+                "message": (
+                    f"Your plan covers up to {allowed}-day campaigns. "
+                    f"Upgrade to run a {campaign_days}-day calendar, or pick a shorter duration."
+                    if allowed
+                    else "Choose a campaign pack (14 / 30 / 45 / 60 days) to generate."
+                ),
+                "billing_url": "/app/workspace",
+                "campaign_days": campaign_days,
+                "max_campaign_days": allowed,
+            },
+        )
+
     existing = job_manager.active_job()
     if existing:
         return ProcessResponse(job_id=existing["job_id"], status=existing["status"])
 
     job_id = job_manager.create_job(req.source)
-    enqueue_job(job_id, req.source, req.content_plan, req.brand_context)
+    enqueue_job(
+        job_id,
+        req.source,
+        req.content_plan,
+        req.brand_context,
+        source_start=req.source_start,
+        source_end=req.source_end,
+    )
     return ProcessResponse(job_id=job_id, status="queued", studio_url="/studio")
 
 
@@ -1049,8 +1318,12 @@ ITEM_STATUS_ALIASES = {
     "aigenerated": "ai_generated",
     "generated": "ai_generated",
     "draft": "ai_generated",
+    "pending": "ai_generated",
+    "needs_approval": "ai_generated",
+    "needs_approval_review": "ai_generated",
     "scheduled": "scheduled",
-    "pending": "scheduled",
+    "approved": "scheduled",
+    "approve": "scheduled",
     "scheduled_repost": "scheduled",
     "paused": "paused",
     "review": "paused",
@@ -1059,6 +1332,8 @@ ITEM_STATUS_ALIASES = {
     "posted": "posted",
     "published": "posted",
     "skipped": "skipped",
+    "rejected": "skipped",
+    "reject": "skipped",
     "wont_post": "skipped",
     "wontpost": "skipped",
     "cancel": "skipped",
@@ -1107,6 +1382,37 @@ def set_scheduled_item_status(item_id: str, req: ScheduleStatusRequest):
     return {
         "status": canonical,
         "item_id": item_id,
+        **_schedule_payload(bank, year=req.year, month=req.month),
+    }
+
+
+@app.post("/review/bulk")
+def review_bulk(req: ReviewBulkRequest):
+    """Approve or reject many AI draft clips in one pass (HITL review board)."""
+    bank = _read_bank()
+    items = bank.get("items") or []
+    if not items:
+        raise HTTPException(status_code=404, detail="No campaign items to review.")
+    target_status = "scheduled" if req.action == "approve" else "skipped"
+    ids = {str(i) for i in (req.item_ids or []) if i}
+    touched = []
+    for item in items:
+        item_id = str(item.get("id") or "")
+        if ids and item_id not in ids:
+            continue
+        if not ids:
+            status = (item.get("status") or "").lower()
+            if status not in {"ai_generated", "pending", "draft", ""}:
+                continue
+        _apply_item_status(item, target_status)
+        touched.append(item_id)
+    if not touched:
+        raise HTTPException(status_code=400, detail="No matching items to review.")
+    _write_bank(bank)
+    return {
+        "action": req.action,
+        "updated": touched,
+        "count": len(touched),
         **_schedule_payload(bank, year=req.year, month=req.month),
     }
 

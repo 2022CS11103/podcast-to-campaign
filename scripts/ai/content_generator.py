@@ -17,8 +17,7 @@ from config.platform_specs import AB_VARIANT_IDS
 # Pillar pieces are generated once from the full talk (SEO + email).
 PILLAR_PLATFORMS = ("blog", "newsletter")
 
-VARIANT_PROMPT = """You write A/B/C hooks and captions for a short-form clip.
-
+VARIANT_JSON_FOOTER = """
 Return ONLY valid JSON, no markdown:
 {{
   "variants": [
@@ -28,15 +27,10 @@ Return ONLY valid JSON, no markdown:
   ]
 }}
 
-Rules:
+Rules for all platforms:
 - Variant A ships first. B and C are held for A/B tests.
 - Hook is on-screen text for the edited Short (max 8 words). Match the jump-cut, not the full talk.
-- Caption must sell THIS clip's moment. The video already has punch-in zooms and captions.
-- Caption must match the platform:
-  - instagram_reels / tiktok: 80-130 words, line breaks, 8 hashtags at end
-  - youtube_shorts: Title / Description / Tags format
-  - linkedin: 150-220 words, professional, max 3 hashtags. Open with the same hook as the cut.
-  - twitter: 5-8 tweet thread, numbered, lead tweet is the hook
+- Caption must sell THIS clip's moment — not the whole episode.
 - Do not mention A/B testing, AI, or "we clipped this from a podcast".
 
 Platform: {platform}
@@ -47,6 +41,66 @@ Existing hook: {hook}
 Transcript window:
 {text}
 """
+
+SHORTFORM_VARIANT_PROMPT = """You write A/B/C hooks and captions for a vertical short-form clip.
+
+Caption rules for {platform}:
+- 80-130 words with line breaks
+- End with 5-8 relevant hashtags
+- Punchy, spoken-word energy; open with the same hook as the cut
+- youtube_shorts may use Title / Description / Tags if that fits better than a single caption block
+""" + VARIANT_JSON_FOOTER
+
+LINKEDIN_VARIANT_PROMPT = """You write A/B/C LinkedIn posts for decision-makers from one short clip moment.
+
+Follow this LinkedIn voice (thought-leadership, not entertainment):
+{platform_brief}
+
+Caption rules for linkedin:
+- 150-220 words, short paragraphs, professional but human
+- Open with a strong insight line (same idea as the hook)
+- Frame as a lesson, framework, or business takeaway from THIS moment
+- Max 3 hashtags at the end
+- End with a question or clear CTA
+- No emoji spam, no "thread" numbering
+""" + VARIANT_JSON_FOOTER
+
+TWITTER_VARIANT_PROMPT = """You write A/B/C X/Twitter threads from one short clip moment.
+
+Follow this X voice:
+{platform_brief}
+
+Caption rules for twitter:
+- Format the caption as a 5-8 tweet thread
+- Tweet 1 = hook under 200 characters, no hashtags
+- Tweets 2–N numbered (2/, 3/, …), one idea each
+- Final tweet = question or CTA, max 2 hashtags
+- Punchy and specific — no corporate filler
+""" + VARIANT_JSON_FOOTER
+
+
+def _platform_brief(platform: str) -> str:
+    name = {
+        "linkedin": "linkedin",
+        "twitter": "twitter",
+        "youtube_shorts": "youtube",
+        "instagram_reels": "instagram",
+        "tiktok": "instagram",
+    }.get(platform)
+    if not name:
+        return ""
+    try:
+        return load_prompt(name).strip()
+    except FileNotFoundError:
+        return ""
+
+
+def variant_prompt_for(platform: str) -> str:
+    if platform == "linkedin":
+        return LINKEDIN_VARIANT_PROMPT
+    if platform == "twitter":
+        return TWITTER_VARIANT_PROMPT
+    return SHORTFORM_VARIANT_PROMPT
 
 
 def load_json(path: Path, default=None):
@@ -145,15 +199,18 @@ def generate_item_variants(item: dict, clip_lookup: dict, brand: dict) -> list:
     text = clip.get("text") or item.get("summary") or ""
     fallback_caption = item.get("summary") or ""
     fallback_hook = item.get("hook") or clip.get("hook") or ""
-    prompt = VARIANT_PROMPT.format(
-        platform=item.get("assigned_platform", "instagram_reels"),
+    platform = item.get("assigned_platform", "instagram_reels")
+    template = variant_prompt_for(platform)
+    prompt = template.format(
+        platform=platform,
+        platform_brief=_platform_brief(platform),
         brand=json.dumps(brand, indent=2),
         summary=item.get("summary") or clip.get("summary") or "",
         hook=fallback_hook,
         text=text[:4000],
     )
     try:
-        raw = generate_text(prompt, "marketing_variants")
+        raw = generate_text(prompt, f"marketing_variants_{platform}")
         return parse_variants(raw, fallback_hook, fallback_caption)
     except Exception as exc:
         print(f"  variants for {item.get('id')} failed ({exc}). Using hook fallback.")
@@ -200,7 +257,9 @@ def main():
                 variant_map[item_id] = variants
 
         for item in bank["items"]:
-            variants = variant_map[item["id"]]
+            variants = variant_map.get(item["id"]) or parse_variants(
+                "", item.get("hook") or "", item.get("summary") or ""
+            )
             item["variants"] = variants
             item["active_variant"] = "A"
             item["performance"] = item.get("performance") or {

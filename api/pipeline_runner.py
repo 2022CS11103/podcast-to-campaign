@@ -311,7 +311,7 @@ def _wind_down(job_id, stopped: JobStopped, content_plan, done_stages):
 
 def _worker():
     while True:
-        job_id, source, content_plan, brand_context = task_queue.get()
+        job_id, source, content_plan, brand_context, source_start, source_end = task_queue.get()
         done_stages = set()
         try:
             reset_log()
@@ -332,7 +332,7 @@ def _worker():
 
             job_manager.update(job_id, status="running", step="video")
             stages = [
-                ("video", lambda: creator.video.run(source)),
+                ("video", lambda: creator.video.run(source, source_start=source_start, source_end=source_end)),
                 ("transcript", creator.transcript.run),
                 ("highlight", creator.highlight.run),
                 ("strategy", lambda: _run_script("scripts/ai/strategy_agent.py")),
@@ -396,5 +396,12 @@ def start_worker():
     t.start()
 
 
-def enqueue_job(job_id: str, source: str, content_plan: dict = None, brand_context: dict = None):
-    task_queue.put((job_id, source, content_plan, brand_context))
+def enqueue_job(
+    job_id: str,
+    source: str,
+    content_plan: dict = None,
+    brand_context: dict = None,
+    source_start=None,
+    source_end=None,
+):
+    task_queue.put((job_id, source, content_plan, brand_context, source_start, source_end))

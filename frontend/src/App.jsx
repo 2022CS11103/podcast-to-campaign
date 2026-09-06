@@ -15,8 +15,10 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ClipboardCheck,
   Clock3,
   Copy,
+  CreditCard,
   Download,
   FileText,
   FileVideo,
@@ -32,7 +34,6 @@ import {
   Plus,
   RefreshCw,
   Rocket,
-  Settings2,
   Sparkles,
   Square,
   Trash2,
@@ -43,6 +44,9 @@ import {
 import { BrandingFields, brandPayloadFromForm, formFromBrand } from "./branding";
 import { BrandIcon } from "./BrandIcon";
 import { AuthProvider, useAuth } from "./auth";
+import { BillingPanel, PaywallCard, checkoutIsReady, paywallActive, recommendPlan, useBilling } from "./billing";
+import { QualityChips, ReviewPage } from "./review";
+import { TranscriptPage } from "./transcript";
 import { apiUrl, creatorApi } from "./api";
 import {
   DEFAULT_CAMPAIGN,
@@ -115,9 +119,11 @@ function AppShell({ children, step, flow = true }) {
     { to: "/", label: "Home", icon: Home, active: path === "/" },
     { to: "/campaign", label: "Content", icon: Film, active: path.startsWith("/campaign") || path.startsWith("/strategy") || path.startsWith("/processing") },
     { to: "/calendar", label: "Calendar", icon: CalendarDays, active: path.startsWith("/calendar") },
+    { to: "/review", label: "Review", icon: ClipboardCheck, active: path.startsWith("/review") },
+    { to: "/transcript", label: "Transcript", icon: FileText, active: path.startsWith("/transcript") },
     { to: "/results/latest", label: "Library", icon: BarChart3, active: path.startsWith("/results") || path.startsWith("/complete") },
     { to: "/accounts", label: "Accounts", icon: Link2, active: path.startsWith("/accounts") },
-    { to: "/workspace", label: "Settings", icon: Settings2, active: path.startsWith("/workspace") },
+    { to: "/workspace", label: "Billing", icon: CreditCard, active: path.startsWith("/workspace") },
   ];
 
   return (
@@ -283,19 +289,20 @@ function itemPostText(item) {
 }
 
 const POST_STATUSES = [
-  { id: "ai_generated", label: "AI generated", tone: "ai" },
-  { id: "scheduled", label: "Scheduled", tone: "scheduled" },
-  { id: "paused", label: "Needs review / paused", tone: "review" },
+  { id: "ai_generated", label: "Needs approval", tone: "ai" },
+  { id: "scheduled", label: "Approved / scheduled", tone: "scheduled" },
+  { id: "paused", label: "Paused", tone: "review" },
   { id: "posted", label: "Published", tone: "published" },
-  { id: "skipped", label: "Won't post", tone: "failed" },
+  { id: "skipped", label: "Rejected / won't post", tone: "failed" },
 ];
 
 function normalizePostStatus(status) {
-  const raw = String(status || "pending").toLowerCase().replace(/[\s'-]+/g, "_");
-  if (["skipped", "wont_post", "cancelled", "canceled"].includes(raw)) return "skipped";
+  const raw = String(status || "ai_generated").toLowerCase().replace(/[\s'-]+/g, "_");
+  if (["skipped", "wont_post", "cancelled", "canceled", "rejected", "reject"].includes(raw)) return "skipped";
   if (["posted", "published"].includes(raw)) return "posted";
   if (["paused", "review", "needs_review", "needs_review_paused"].includes(raw)) return "paused";
-  if (["ai_generated", "generated", "draft"].includes(raw)) return "ai_generated";
+  if (["ai_generated", "generated", "draft", "pending", "needs_approval"].includes(raw)) return "ai_generated";
+  if (["approved", "approve"].includes(raw)) return "scheduled";
   return "scheduled";
 }
 
@@ -349,8 +356,8 @@ function HomePage({ currentJob }) {
         title={`${dayGreeting()}, ${displayName(auth.user)}`}
         description={
           hasCampaign
-            ? "Your content this month — plan, edit, and schedule from here."
-            : "Turn one video into a month of content. Create once. Repurpose everywhere."
+            ? "Agency desk: review AI clip picks, approve what ships, and manage the client calendar."
+            : "White-label clip desk for agencies — upload a client podcast, approve AI candidates, brand the outputs."
         }
         aside={
           <button className="primary-button" onClick={() => navigate("/campaign")}>
@@ -363,47 +370,50 @@ function HomePage({ currentJob }) {
           <div className="result-kpis">
             <div><Play size={19} /><span>Shorts</span><strong>{board?.video_renders ?? "—"}</strong></div>
             <div><Film size={19} /><span>Posts</span><strong>{summary.total_content_pieces || items.length || "—"}</strong></div>
-            <div><CalendarDays size={19} /><span>Scheduled</span><strong>{board?.calendar?.total_posts || items.length || "—"}</strong></div>
+            <div><ClipboardCheck size={19} /><span>Needs approval</span><strong>{board?.needs_review_count ?? items.filter((i) => normalizePostStatus(i.status) === "ai_generated").length}</strong></div>
             <div><Clock3 size={19} /><span>This run</span><strong>{summary.processing_human || "—"}</strong></div>
           </div>
           <div className="home-actions">
+            <button className="home-card" onClick={() => navigate("/review")}>
+              <ClipboardCheck size={18} />
+              <strong>Review board</strong>
+              <p>Approve or reject AI clip candidates with reasons.</p>
+            </button>
             <button className="home-card" onClick={() => navigate(currentJob ? `/results/${currentJob}` : "/results/latest")}>
               <Film size={18} />
               <strong>Open library</strong>
-              <p>Review clips, captions, and downloads.</p>
+              <p>Preview cuts, captions, and downloads.</p>
             </button>
             <button className="home-card" onClick={() => navigate("/calendar")}>
               <CalendarDays size={18} />
               <strong>Content calendar</strong>
               <p>Pause a platform or any date.</p>
             </button>
-            <button className="home-card" onClick={() => navigate("/accounts")}>
-              <Link2 size={18} />
-              <strong>Connected accounts</strong>
-              <p>YouTube, Instagram, LinkedIn, and X.</p>
-            </button>
           </div>
         </>
       ) : (
         <section className="panel home-empty">
-          <span className="overline">Get started</span>
-          <h2>One video. A month of content.</h2>
-          <p>Upload a talk or podcast and creatorOS will plan, edit, and schedule across every platform.</p>
+          <span className="overline">Agency wedge</span>
+          <h2>Client podcast in. Approve-ready clips out.</h2>
+          <p>
+            Upload the source file (safest for client work), let AI propose candidates with reasons,
+            then approve what your team would actually publish — with the client’s logo on the end screen.
+          </p>
           <div className="home-actions">
             <button className="home-card" onClick={() => navigate("/campaign")}>
               <Upload size={18} />
-              <strong>Upload a video</strong>
-              <p>Paste a YouTube link or drop a file.</p>
+              <strong>Upload client video</strong>
+              <p>Preferred: MP4/MOV from Riverside, Zoom, or Descript.</p>
             </button>
             <button className="home-card" onClick={() => navigate("/accounts")}>
               <Link2 size={18} />
               <strong>Connect accounts</strong>
-              <p>Optional — you can generate without connecting.</p>
+              <p>Optional — export packages without auto-posting.</p>
             </button>
-            <button className="home-card" onClick={() => navigate("/calendar")}>
-              <CalendarDays size={18} />
-              <strong>See the calendar</strong>
-              <p>Your month of posts will land here.</p>
+            <button className="home-card" onClick={() => navigate("/review")}>
+              <ClipboardCheck size={18} />
+              <strong>Review board</strong>
+              <p>Human-in-the-loop approval is the product.</p>
             </button>
           </div>
         </section>
@@ -689,38 +699,60 @@ function CampaignPage({ campaign, setCampaign }) {
   return (
     <AppShell step="campaign">
       <PageHeading
-        eyebrow="Content"
-        title="Turn one video into a month of content"
-        description="Upload your podcast and let creatorOS plan, edit, and schedule across every platform."
+        eyebrow="Client source"
+        title="Upload the podcast your agency is editing"
+        description="Prefer a file from Riverside, Zoom, or Descript. YouTube URL is optional and can hit download blocks — upload is the reliable path for client work."
       />
       <section className="panel campaign-panel">
         <div className="source-switch">
+          <button className={campaign.sourceType === "upload" ? "active" : ""} onClick={() => update("sourceType", "upload")}>
+            <Upload size={17} /> Upload video (recommended)
+          </button>
           <button className={campaign.sourceType === "url" ? "active" : ""} onClick={() => update("sourceType", "url")}>
             <Link2 size={17} /> Podcast / YouTube URL
           </button>
-          <button className={campaign.sourceType === "upload" ? "active" : ""} onClick={() => update("sourceType", "upload")}>
-            <Upload size={17} /> Upload video
-          </button>
         </div>
 
-        {campaign.sourceType === "url" ? (
-          <Field label="Podcast or YouTube URL" hint="Paste a public episode or video link. If YouTube blocks the download, switch to Upload video." wide>
-            <div className="input-with-icon"><Link2 size={18} /><input value={campaign.source} onChange={(e) => update("source", e.target.value)} placeholder="https://youtube.com/watch?v=…" /></div>
-          </Field>
-        ) : (
-          <Field label="Source video" hint="MP4, MOV, MKV, or WebM. Large files may take a moment to upload." wide>
+        {campaign.sourceType === "upload" ? (
+          <Field label="Source video" hint="MP4, MOV, MKV, or WebM from a source you own or are licensed to edit." wide>
             <label className={`upload-drop ${uploading ? "busy" : ""}`}>
               <FileVideo size={26} />
               <div>
-                <strong>{campaign.sourceName || "Drop a video here or browse"}</strong>
-                <span>{uploading ? "Uploading securely…" : "Your original is never modified"}</span>
+                <strong>{campaign.sourceName || "Drop a client video here or browse"}</strong>
+                <span>{uploading ? "Uploading securely…" : "Original file is never overwritten"}</span>
               </div>
               {uploading ? <LoaderCircle className="spin" /> : <Upload size={19} />}
               <input type="file" accept="video/*,.mkv" onChange={(e) => handleFile(e.target.files?.[0])} />
             </label>
           </Field>
+        ) : (
+          <Field label="Podcast or YouTube URL" hint="Only use URLs you have rights to. If YouTube blocks the download, switch to Upload." wide>
+            <div className="input-with-icon"><Link2 size={18} /><input value={campaign.source} onChange={(e) => update("source", e.target.value)} placeholder="https://youtube.com/watch?v=…" /></div>
+            <p className="source-legal-note">
+              Third-party YouTube downloads can violate platform rules and fail with 403/token errors.
+              For commercial agency work, upload the client’s master file instead.
+            </p>
+          </Field>
         )}
 
+        {campaign.sourceType === "url" ? (
+          <div className="form-grid timespan-grid">
+            <Field label="Start time (optional)" hint="Skip the long intro — e.g. 12:00 or 1:05:00">
+              <input
+                value={campaign.sourceStart || ""}
+                onChange={(e) => update("sourceStart", e.target.value)}
+                placeholder="0:00"
+              />
+            </Field>
+            <Field label="End time (optional)" hint="Only this window downloads (not the full 2h podcast)">
+              <input
+                value={campaign.sourceEnd || ""}
+                onChange={(e) => update("sourceEnd", e.target.value)}
+                placeholder="25:30"
+              />
+            </Field>
+          </div>
+        ) : null}
         <Field label="What kind of show is this?" hint="Comedy keeps the laugh. Interviews open on the bold line." wide>
         <div className="show-types">
           {SHOW_TYPES.map((item) => (
@@ -738,8 +770,8 @@ function CampaignPage({ campaign, setCampaign }) {
         </Field>
 
         <div className="form-grid">
-          <Field label="Brand name">
-            <input value={campaign.brandName} onChange={(e) => update("brandName", e.target.value)} placeholder="CreatorOS" />
+          <Field label="Client brand name" hint="Used on end screens — swap per client for white-label pilots.">
+            <input value={campaign.brandName} onChange={(e) => update("brandName", e.target.value)} placeholder="Client brand" />
           </Field>
           <Field label="Website" hint="Optional">
             <input value={campaign.website} onChange={(e) => update("website", e.target.value)} placeholder="https://yourbrand.com" />
@@ -831,6 +863,7 @@ function Counter({ value, onChange, min = 0, max = 30 }) {
 
 function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
   const navigate = useNavigate();
+  const { billing, loading: billingLoading, busy, startCheckout, error: billingError } = useBilling();
   const platformNames = {
     instagram_reels: "Instagram Reels",
     youtube_shorts: "YouTube Shorts",
@@ -839,6 +872,17 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
   };
   const totals = Object.values(plan).filter((item) => item.enabled).reduce((sum, item) => sum + item.count, 0);
   const update = (key, patch) => setPlan((current) => ({ ...current, [key]: { ...current[key], ...patch } }));
+  const checkoutReady = checkoutIsReady(billing);
+  const needsPaywall = paywallActive(billing);
+  const durationCapped = Boolean(
+    checkoutReady
+    && billing?.entitled
+    && Number(billing?.max_campaign_days || 0) > 0
+    && Number(campaign.durationDays) > Number(billing.max_campaign_days)
+  );
+  const showPlansTeaser = !needsPaywall && !durationCapped;
+  const plans = billing?.plans || [];
+  const blockGenerate = needsPaywall || durationCapped;
 
   return (
     <AppShell step="strategy">
@@ -847,6 +891,58 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
         title="Shape the month before AI starts"
         description="Tune how many posts each platform gets. Pause a channel later without deleting the campaign."
       />
+      {needsPaywall ? (
+        <div style={{ marginBottom: 18 }}>
+          <PaywallCard
+            busy={busy || billingLoading}
+            billingEnabled={checkoutReady}
+            plans={plans}
+            durationDays={campaign.durationDays}
+            onUpgrade={(priceId, days) => startCheckout(priceId, days || campaign.durationDays)}
+            description={`Unlock a ${campaign.durationDays}-day campaign pack — Shorts, Reels, LinkedIn/X copy, and the calendar.`}
+          />
+          {billingError ? <Notice>{billingError}</Notice> : null}
+        </div>
+      ) : null}
+      {durationCapped ? (
+        <div style={{ marginBottom: 18 }}>
+          <PaywallCard
+            title="Upgrade for a longer calendar"
+            busy={busy || billingLoading}
+            billingEnabled={checkoutReady}
+            plans={plans}
+            durationDays={campaign.durationDays}
+            onUpgrade={(priceId, days) => startCheckout(priceId, days || campaign.durationDays)}
+            description={`Your plan covers up to ${billing.max_campaign_days} days. This campaign is ${campaign.durationDays} days — upgrade the pack or shorten the duration.`}
+          />
+          {billingError ? <Notice>{billingError}</Notice> : null}
+        </div>
+      ) : null}
+      {showPlansTeaser ? (
+        <section className="panel campaign-panel billing-teaser" style={{ marginBottom: 18 }}>
+          <div className="section-heading">
+            <div>
+              <span className="overline">Billing</span>
+              <h2>
+                {checkoutReady
+                  ? `Covered · up to ${billing.max_campaign_days || "—"} days`
+                  : "Optional packs (testing)"}
+              </h2>
+            </div>
+            <CreditCard size={18} />
+          </div>
+          <p className="account-copy">
+            {checkoutReady
+              ? `Your ${campaign.durationDays}-day campaign fits your plan. Generate when ready.`
+              : "Billing is off while you test — generate freely. Packs are preview-only until Stripe is configured."}
+          </p>
+          <div className="page-actions">
+            <button className="secondary-button" onClick={() => navigate("/workspace#billing")}>
+              <CreditCard size={16} /> View packs
+            </button>
+          </div>
+        </section>
+      ) : null}
       <div className="strategy-layout">
         <div className="strategy-grid">
           {Object.entries(plan).map(([key, item]) => {
@@ -883,10 +979,24 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
             <div><Clock3 size={16} /><span>Estimated processing</span><strong>8–15 min</strong></div>
             <div><Film size={16} /><span>Distinct video edits</span><strong>{(plan.youtube_shorts.enabled ? plan.youtube_shorts.count : 0) + (plan.instagram_reels.enabled ? plan.instagram_reels.count : 0)}</strong></div>
           </div>
-          <button className="primary-button full" onClick={onGenerate} disabled={generating || !campaign.source}>
-            {generating ? <LoaderCircle className="spin" size={18} /> : <Rocket size={18} />}
-            {generating ? "Starting campaign…" : "Generate AI campaign"}
-          </button>
+          {blockGenerate && checkoutReady ? (
+            <button
+              className="primary-button full"
+              onClick={() => {
+                const pick = recommendPlan(plans, campaign.durationDays);
+                startCheckout(pick?.price_id, campaign.durationDays);
+              }}
+              disabled={busy || billingLoading || generating || !campaign.source}
+            >
+              {busy || generating ? <LoaderCircle className="spin" size={18} /> : <Rocket size={18} />}
+              {durationCapped ? "Upgrade pack to generate" : "Get campaign pack"}
+            </button>
+          ) : (
+            <button className="primary-button full" onClick={onGenerate} disabled={generating || !campaign.source}>
+              {generating ? <LoaderCircle className="spin" size={18} /> : <Rocket size={18} />}
+              {generating ? "Starting campaign…" : "Generate AI campaign"}
+            </button>
+          )}
           <p className="privacy-note">You stay in control. CreatorOS prepares drafts and private uploads only.</p>
         </aside>
       </div>
@@ -1471,15 +1581,18 @@ function CompletionPage({ currentJob }) {
         <div className="completion-burst"><Check size={34} /></div>
         <div>
           <div className="eyebrow">Campaign complete</div>
-          <h1>Your content engine is ready</h1>
+          <h1>Drafts ready — approve before anything ships</h1>
           <p>
-            Everything is generated and dated. Pause a platform or a single date
-            any time this month — the rest of the campaign keeps moving.
+            AI proposed the clips and platform copy. Open the review board, approve what your
+            agency would publish, reject the rest. Calendar stays honest about what’s approved.
           </p>
         </div>
         <div className="completion-actions">
-          <button className="primary-button" onClick={() => navigate(`/results/${resolvedJob}`)}>
-            Open campaign library <ArrowRight size={17} />
+          <button className="primary-button" onClick={() => navigate("/review")}>
+            Review & approve clips <ArrowRight size={17} />
+          </button>
+          <button className="secondary-button" onClick={() => navigate(`/results/${resolvedJob}`)}>
+            Open campaign library
           </button>
           <button className="secondary-button" onClick={() => navigate("/calendar")}>
             <CalendarDays size={16} /> Manage posting
@@ -1698,9 +1811,12 @@ function ResultsPage({ currentJob }) {
       <PageHeading
         eyebrow="Library"
         title="Your campaign assets"
-        description="Preview the 9:16 cuts, copy the markdown, and set each post to scheduled, paused, or won’t post."
+        description="Preview 9:16 cuts with quality signals, then approve on the Review board before treating them as scheduled."
         aside={
           <div className="heading-actions">
+            <button className="secondary-button" onClick={() => navigate("/review")}>
+              <ClipboardCheck size={16} /> Review board
+            </button>
             <button
               className="secondary-button"
               onClick={() =>
@@ -1775,6 +1891,10 @@ function ResultsPage({ currentJob }) {
               )}
               <div className="asset-body">
                 <h3>{item.display_hook || item.hook || "Untitled asset"}</h3>
+                <QualityChips item={item} />
+                {item.transcript_excerpt ? (
+                  <blockquote className="review-excerpt">{item.transcript_excerpt}</blockquote>
+                ) : null}
                 <p className="asset-caption">{item.display_caption || item.summary || "Campaign copy is ready for review."}</p>
                 {item.post_markdown ? <pre className="post-markdown compact">{item.post_markdown}</pre> : null}
                 <p className="asset-copy-hint">
@@ -1894,7 +2014,7 @@ function CalendarStudio() {
   );
 }
 
-function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign }) {
+function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign, campaign }) {
   const auth = useAuth();
   const navigate = useNavigate();
   const connected = (accounts || []).filter((item) => item.connected);
@@ -1906,6 +2026,13 @@ function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign }) 
 
   useEffect(() => {
     creatorApi.getBrand().then((brand) => setBrandForm(formFromBrand(brand))).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (window.location.hash === "#billing") {
+      const el = document.getElementById("billing");
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }, []);
 
   const syncCampaign = (form) => {
@@ -1976,11 +2103,12 @@ function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign }) 
   return (
     <AppShell flow={false}>
       <PageHeading
-        eyebrow="Settings"
-        title="Your workspace"
-        description="Branding, accounts, schedule control, and sign out — the whole campaign stays here."
+        eyebrow="Billing & settings"
+        title="Plans and workspace"
+        description="Campaign packs match 14 / 30 / 45 / 60-day calendars. Manage branding and accounts here too."
       />
-      <section className="panel campaign-panel">
+      <BillingPanel durationDays={campaign?.durationDays || 30} />
+      <section className="panel campaign-panel" style={{ marginTop: 18 }}>
         <div className="section-heading">
           <div>
             <span className="overline">Signed in</span>
@@ -2332,6 +2460,8 @@ function CreatorApp() {
       }
       const result = await creatorApi.startCampaign({
         source: campaign.source,
+        source_start: campaign.sourceType === "url" ? (campaign.sourceStart || undefined) : undefined,
+        source_end: campaign.sourceType === "url" ? (campaign.sourceEnd || undefined) : undefined,
         campaign_start_date: campaign.startDate,
         content_plan: contentPlan,
         brand_context: brandPayload,
@@ -2339,6 +2469,11 @@ function CreatorApp() {
       setCurrentJob(result.job_id);
       navigate(`/processing/${result.job_id}`);
     } catch (error) {
+      if (error?.status === 402 || /subscribe|subscription/i.test(error?.message || "")) {
+        window.alert(error.message || "Subscribe to Creator Pro to generate campaigns.");
+        navigate("/workspace");
+        return;
+      }
       window.alert(error.message);
     } finally {
       setGenerating(false);
@@ -2363,9 +2498,11 @@ function CreatorApp() {
       <Route path="/strategy" element={<StrategyPage campaign={campaign} plan={plan} setPlan={setPlan} onGenerate={generate} generating={generating} />} />
       <Route path="/processing/:jobId?" element={<ProcessingPage currentJob={currentJob} onComplete={setCurrentJob} plan={plan} setPlan={setPlan} />} />
       <Route path="/complete/:jobId" element={<CompletionPage currentJob={currentJob} />} />
+      <Route path="/review" element={<ReviewPage AppShell={AppShell} PageHeading={PageHeading} Notice={Notice} />} />
+      <Route path="/transcript" element={<TranscriptPage AppShell={AppShell} PageHeading={PageHeading} Notice={Notice} CopyButton={CopyButton} Field={Field} />} />
       <Route path="/results/:jobId" element={<ResultsPage currentJob={currentJob} />} />
       <Route path="/calendar" element={<CalendarStudio />} />
-      <Route path="/workspace" element={<WorkspacePage accounts={accounts} refreshAccounts={refreshAccounts} accountBusy={accountBusy} setCampaign={setCampaign} />} />
+      <Route path="/workspace" element={<WorkspacePage accounts={accounts} refreshAccounts={refreshAccounts} accountBusy={accountBusy} setCampaign={setCampaign} campaign={campaign} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 from agents.base_agent import BaseAgent
-from scripts.pipeline.download_video import local_video_for_url
+from scripts.pipeline.download_video import local_video_for_url, parse_timecode
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PYTHON = sys.executable
@@ -61,23 +61,34 @@ class VideoAgent(BaseAgent):
         super().__init__()
         self.python = PYTHON
 
-    def run(self, input_source):
+    def run(self, input_source, source_start=None, source_end=None):
 
         self.log("Starting video processing...")
+        start = parse_timecode(source_start) if source_start not in (None, "") else None
+        end = parse_timecode(source_end) if source_end not in (None, "") else None
+        if start is not None and end is not None and end <= start:
+            raise RuntimeError("Clip end time must be after the start time.")
 
         if str(input_source).startswith("http://") or str(input_source).startswith("https://"):
             url = str(input_source).strip()
-            if local_video_for_url(url):
-                self.log("Reusing the existing download for this YouTube link.")
+            if local_video_for_url(url, start=start, end=end):
+                self.log("Reusing the existing download for this link + timespan.")
             else:
-                # One argv: playlist query strings contain &, which a shell would split.
-                _run(
-                    [
-                        self.python,
-                        "scripts/pipeline/download_video.py",
-                        url,
-                    ]
-                )
+                args = [
+                    self.python,
+                    "scripts/pipeline/download_video.py",
+                    url,
+                ]
+                if start is not None:
+                    args.extend(["--start", str(start)])
+                if end is not None:
+                    args.extend(["--end", str(end)])
+                if start is not None or end is not None:
+                    self.log(
+                        f"Partial download "
+                        f"{start or 0:.0f}s → {end if end is not None else 'end'}…"
+                    )
+                _run(args)
             input_source = "input/video.mp4"
 
         video_path = Path(input_source)
@@ -93,6 +104,11 @@ class VideoAgent(BaseAgent):
             "video_path",
             str(input_source)
         )
+        if start is not None or end is not None:
+            self.memory.update(
+                "source_timespan",
+                {"start": start, "end": end},
+            )
 
         _run(
             [

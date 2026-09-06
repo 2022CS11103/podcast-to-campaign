@@ -98,6 +98,46 @@ def canonical_youtube_url(url: str) -> str:
     return raw
 
 
+def parse_timecode(value) -> float | None:
+    """Parse '1:30:00', '12:05', '90', '1h30m', or seconds into float seconds."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    raw = str(value).strip().lower()
+    if not raw:
+        return None
+    if re.fullmatch(r"\d+(\.\d+)?", raw):
+        return float(raw)
+    hm = re.fullmatch(r"(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s?)?", raw)
+    if hm and any(hm.groups()):
+        hours = int(hm.group(1) or 0)
+        minutes = int(hm.group(2) or 0)
+        seconds = float(hm.group(3) or 0)
+        return hours * 3600 + minutes * 60 + seconds
+    if ":" in raw:
+        parts = raw.split(":")
+        if not all(re.fullmatch(r"\d+(\.\d+)?", p) for p in parts):
+            raise ValueError(f"Invalid timecode: {value}")
+        nums = [float(p) for p in parts]
+        if len(nums) == 2:
+            return nums[0] * 60 + nums[1]
+        if len(nums) == 3:
+            return nums[0] * 3600 + nums[1] * 60 + nums[2]
+    raise ValueError(f"Invalid timecode: {value}")
+
+
+def format_timecode(seconds: float | None) -> str:
+    if seconds is None:
+        return ""
+    total = max(0, int(round(float(seconds))))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
 def _is_bot_check(exc: BaseException) -> bool:
     text = str(exc).lower()
     return any(hint in text for hint in BOT_HINTS)
@@ -150,16 +190,43 @@ def _source_marker() -> Path:
     return PROJECT_ROOT / "input" / ".source_url"
 
 
-def local_video_for_url(url: str) -> Path | None:
-    """Return input/video.mp4 when it already matches this YouTube link."""
+def _write_source_marker(url: str, start: float | None = None, end: float | None = None) -> None:
+    payload = {"url": url, "start": start, "end": end}
+    _source_marker().write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _read_source_marker() -> dict:
+    marker = _source_marker()
+    if not marker.exists():
+        return {}
+    raw = marker.read_text(encoding="utf-8", errors="replace").strip()
+    if not raw:
+        return {}
+    if raw.startswith("{"):
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {"url": raw}
+        except json.JSONDecodeError:
+            return {"url": raw}
+    return {"url": raw}
+
+
+def local_video_for_url(url: str, start=None, end=None) -> Path | None:
+    """Return input/video.mp4 when it already matches this YouTube link + timespan."""
     canonical = canonical_youtube_url(url)
     dest = PROJECT_ROOT / "input" / "video.mp4"
-    marker = _source_marker()
     if not dest.exists() or dest.stat().st_size < 500_000:
         return None
-    if marker.exists():
-        saved = marker.read_text(encoding="utf-8", errors="replace").strip()
-        if saved and saved != canonical:
+    saved = _read_source_marker()
+    if saved.get("url") and saved.get("url") != canonical:
+        return None
+    want_start = parse_timecode(start)
+    want_end = parse_timecode(end)
+    saved_start = parse_timecode(saved.get("start"))
+    saved_end = parse_timecode(saved.get("end"))
+    if (want_start or 0) != (saved_start or 0) or (want_end or 0) != (saved_end or 0):
+        # Different clip window — force a fresh download
+        if want_start is not None or want_end is not None or saved_start is not None or saved_end is not None:
             return None
     ok, _ = _media_ok(dest)
     return dest if ok else None
@@ -176,6 +243,26 @@ def _media_ok(path: Path, expected_duration=None):
         note += " (YouTube only offered this resolution for this session)"
     print(note)
     return True, None
+
+
+def _download_range_hook(start: float | None, end: float | None):
+    """yt-dlp callback: only fetch [start, end] instead of the full podcast."""
+
+    def _ranges(info_dict, _ydl):
+        duration = float((info_dict or {}).get("duration") or 0) or None
+        start_t = float(start or 0)
+        if end is not None:
+            end_t = float(end)
+        elif duration is not None:
+            end_t = duration
+        else:
+            end_t = start_t + 600
+        if end_t <= start_t:
+            raise ValueError("Clip end must be after start.")
+        print(f"Partial download window: {format_timecode(start_t)} → {format_timecode(end_t)}")
+        return [{"start_time": start_t, "end_time": end_t}]
+
+    return _ranges
 
 
 def _cookie_files():
@@ -316,18 +403,30 @@ def _bot_help(url: str, tried: list[str], locked_cookies: bool = False) -> str:
     )
 
 
-def download_video(url):
+def download_video_to(url, output_path: Path, start=None, end=None) -> Path:
     """
-    Downloads a YouTube video as MP4 into input/video.mp4
+    Download a URL (optional timespan) into output_path without touching
+    the campaign's input/video.mp4 unless that is the destination.
     """
     url = canonical_youtube_url(url)
+    start_s = parse_timecode(start)
+    end_s = parse_timecode(end)
+    if start_s is not None and end_s is not None and end_s <= start_s:
+        raise ValueError("end must be after start")
+
+    output_path = Path(output_path)
+    work_dir = output_path.parent
+    work_dir.mkdir(parents=True, exist_ok=True)
+    stem = output_path.stem
+    tmpl = str(work_dir / f"{stem}.%(ext)s")
+
     print(f"yt-dlp {yt_dlp.version.__version__} on Python {sys.version.split()[0]}")
     print(f"Downloading: {url}")
-
-    input_dir = PROJECT_ROOT / "input"
-    input_dir.mkdir(exist_ok=True)
-    output_path = input_dir / "video.mp4"
-    tmpl = str(input_dir / "video.%(ext)s")
+    if start_s is not None or end_s is not None:
+        print(
+            f"Timespan: {format_timecode(start_s or 0)} → "
+            f"{format_timecode(end_s) if end_s is not None else 'end'}"
+        )
 
     thin_keep = None
     tried = []
@@ -335,18 +434,31 @@ def download_video(url):
     saw_bot = False
     saw_locked = False
     expected_duration = None
+    partial = start_s is not None or end_s is not None
 
     for label, auth, clients in _auth_attempts():
         tried.append(label)
         print(f"Trying {label}...")
-        _clear_partials(input_dir, output_path)
+        _safe_unlink(output_path)
+        for leftover in work_dir.glob(f"{stem}.*"):
+            if leftover.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov", ".part"}:
+                _safe_unlink(leftover)
         ydl_opts = _base_opts(tmpl, clients)
         ydl_opts.update(auth)
+        if partial:
+            ydl_opts["download_ranges"] = _download_range_hook(start_s, end_s)
+            ydl_opts["force_keyframes_at_cuts"] = True
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 if info and info.get("duration"):
-                    expected_duration = info.get("duration")
+                    full = float(info.get("duration"))
+                    if partial:
+                        clip_start = start_s or 0.0
+                        clip_end = end_s if end_s is not None else full
+                        expected_duration = max(1.0, clip_end - clip_start)
+                    else:
+                        expected_duration = full
             last_error = None
         except Exception as exc:
             last_error = exc
@@ -362,7 +474,7 @@ def download_video(url):
         produced = output_path
         if not produced.exists():
             matches = sorted(
-                p for p in input_dir.glob("video.*")
+                p for p in work_dir.glob(f"{stem}.*")
                 if p.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}
             )
             if matches:
@@ -376,9 +488,9 @@ def download_video(url):
                 break
             print(f"{label} produced a thin file ({why}) - trying next method...")
             last_error = RuntimeError(why)
-            thin_keep = input_dir / "_thin_backup.mp4"
+            thin_keep = work_dir / f"{stem}_thin_backup.mp4"
             shutil.copy(output_path, thin_keep)
-            _clear_partials(input_dir, output_path)
+            _safe_unlink(output_path)
 
     if not output_path.exists() and thin_keep and thin_keep.exists():
         shutil.move(str(thin_keep), str(output_path))
@@ -394,20 +506,42 @@ def download_video(url):
             raise RuntimeError(f"DOWNLOAD FAILED: {last_error}") from last_error
         raise FileNotFoundError(f"Expected {output_path} after download")
 
-    _source_marker().write_text(url, encoding="utf-8")
+    return output_path
+
+
+def download_video(url, start=None, end=None):
+    """
+    Downloads a YouTube video as MP4 into input/video.mp4.
+
+    Optional start/end (seconds or timecodes) downloads only that window —
+    useful for a 2h podcast when you only need one section.
+    """
+    url = canonical_youtube_url(url)
+    start_s = parse_timecode(start)
+    end_s = parse_timecode(end)
+    if start_s is not None and end_s is not None and end_s <= start_s:
+        raise ValueError("source_end must be after source_start")
+
+    input_dir = PROJECT_ROOT / "input"
+    input_dir.mkdir(exist_ok=True)
+    output_path = input_dir / "video.mp4"
+    download_video_to(url, output_path, start=start_s, end=end_s)
+    _write_source_marker(url, start_s, end_s)
     return output_path
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage:")
-        print("python scripts/pipeline/download_video.py <youtube_url>")
-        sys.exit(2)
+    import argparse
 
-    url = sys.argv[1]
+    parser = argparse.ArgumentParser(description="Download a YouTube/podcast URL (optional timespan).")
+    parser.add_argument("url", help="Video URL")
+    parser.add_argument("--start", default=None, help="Clip start, e.g. 12:00 or 720")
+    parser.add_argument("--end", default=None, help="Clip end, e.g. 25:30 or 1530")
+    args = parser.parse_args()
+
     print("Downloading video...")
     try:
-        video_path = download_video(url)
+        video_path = download_video(args.url, start=args.start, end=args.end)
     except Exception as e:
         print(f"DOWNLOAD FAILED: {e}", file=sys.stderr)
         sys.exit(1)
