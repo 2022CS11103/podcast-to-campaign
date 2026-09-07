@@ -68,6 +68,7 @@ CLIENTS_ANON = ["android", "android_vr", "tv", "mweb"]
 CLIENTS_COOKIES = ["android", "android_vr", "tv"]
 
 BOT_HINTS = ("sign in to confirm", "not a bot", "confirm you’re not a bot", "confirm you're not a bot")
+FORBIDDEN_HINTS = ("http error 403", "po token", "403 forbidden")
 LOCKED_COOKIE_HINTS = (
     "could not copy chrome cookie database",
     "could not find firefox cookies",
@@ -141,6 +142,11 @@ def format_timecode(seconds: float | None) -> str:
 def _is_bot_check(exc: BaseException) -> bool:
     text = str(exc).lower()
     return any(hint in text for hint in BOT_HINTS)
+
+
+def _is_forbidden(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(hint in text for hint in FORBIDDEN_HINTS)
 
 
 def _is_locked_cookie_db(exc: BaseException) -> bool:
@@ -321,11 +327,9 @@ def _browser_installed(name: str) -> bool:
 
 def _browser_names():
     env_browser = os.getenv("YTDLP_COOKIES_FROM_BROWSER", "").strip().lower()
-    # Firefox cookies can be read while the browser is open. Chrome/Edge
-    # lock (and often encrypt) their cookie DB on Windows.
-    preferred = ("firefox", "edge", "chrome", "brave", "chromium")
-    if sys.platform != "win32":
-        preferred = ("chrome", "edge", "firefox", "brave", "chromium")
+    # Firefox cookies can be read while the browser is open and often unlock
+    # HLS when progressive clients 403. Chrome/Edge lock their cookie DB.
+    preferred = ("firefox", "chrome", "edge", "brave", "chromium")
     ordered = []
     if env_browser:
         ordered.append(env_browser)
@@ -346,15 +350,18 @@ def _auth_attempts():
         spec = (browser, profile) if profile else (browser,)
         for client in CLIENTS_COOKIES:
             yield f"cookies from {browser} ({client})", {"cookiesfrombrowser": spec}, [client]
+    # Last resort: let yt-dlp pick default clients (can help on some networks).
+    yield "yt-dlp default clients", {}, []
 
 
 def _base_opts(tmpl: str, clients: list) -> dict:
-    return {
+    opts = {
         # Prefer progressive HTTP MP4 (18/22) over HLS/m3u8.
         "format": (
             "18/22/"
             "b[ext=mp4][protocol^=http]/"
             "bv*[height<=1080][protocol^=http]+ba/"
+            "bv*[height<=1080][protocol^=m3u8]+ba[protocol^=m3u8]/"
             "bv*[height<=1080][height>=720]+ba/"
             "bv*[height<=1080]+ba/"
             "b[height<=1080]/b"
@@ -370,10 +377,12 @@ def _base_opts(tmpl: str, clients: list) -> dict:
         # Windows raises [Errno 22] Invalid argument when yt-dlp applies
         # a Last-Modified / upload timestamp outside the valid range.
         "mtime": False,
-        "extractor_args": {"youtube": {"player_client": clients}},
         "js_runtimes": _js_runtimes(),
         "remote_components": ["ejs:github"],
     }
+    if clients:
+        opts["extractor_args"] = {"youtube": {"player_client": clients}}
+    return opts
 
 
 def _safe_unlink(path: Path) -> None:
@@ -392,8 +401,19 @@ def _clear_partials(input_dir: Path, output_path: Path) -> None:
         _safe_unlink(leftover)
 
 
-def _bot_help(url: str, tried: list[str], locked_cookies: bool = False) -> str:
+def _bot_help(url: str, tried: list[str], locked_cookies: bool = False, forbidden: bool = False) -> str:
     tried_txt = ", ".join(tried) if tried else "none"
+    if forbidden:
+        return (
+            "YouTube blocked this download (HTTP 403 / missing PO token).\n"
+            f"Watch URL: {url}\n"
+            f"Tried: {tried_txt}\n"
+            "Fastest fix: log into youtube.com in Firefox, then retry "
+            "(Firefox cookies can be read while the browser is open). "
+            "Or export a Netscape cookies.txt into the project folder "
+            "(or set YTDLP_COOKIES / YTDLP_COOKIES_FROM_BROWSER). "
+            "You can also upload the MP4 instead."
+        )
     return (
         "YouTube blocked this download (bot check).\n"
         f"Watch URL: {url}\n"
@@ -433,6 +453,7 @@ def download_video_to(url, output_path: Path, start=None, end=None) -> Path:
     last_error = None
     saw_bot = False
     saw_locked = False
+    saw_forbidden = False
     expected_duration = None
     partial = start_s is not None or end_s is not None
 
@@ -465,6 +486,8 @@ def download_video_to(url, output_path: Path, start=None, end=None) -> Path:
             print(f"{label} failed: {exc}", file=sys.stderr)
             if _is_bot_check(exc):
                 saw_bot = True
+            if _is_forbidden(exc):
+                saw_forbidden = True
             if _is_locked_cookie_db(exc):
                 saw_locked = True
             if "is not a valid url" in str(exc).lower() or "unsupported url" in str(exc).lower():
@@ -500,8 +523,10 @@ def download_video_to(url, output_path: Path, start=None, end=None) -> Path:
         thin_keep.unlink()
 
     if not output_path.exists():
-        if saw_bot or saw_locked:
-            raise RuntimeError(_bot_help(url, tried, locked_cookies=saw_locked)) from last_error
+        if saw_bot or saw_locked or saw_forbidden:
+            raise RuntimeError(
+                _bot_help(url, tried, locked_cookies=saw_locked, forbidden=saw_forbidden)
+            ) from last_error
         if last_error:
             raise RuntimeError(f"DOWNLOAD FAILED: {last_error}") from last_error
         raise FileNotFoundError(f"Expected {output_path} after download")

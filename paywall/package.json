@@ -1,0 +1,17 @@
+{
+  "name": "creatoros-paywall",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Standalone creatorOS landing page and Stripe subscription paywall (port 8000)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "pm2:start": "pm2 start ecosystem.config.cjs --update-env",
+    "pm2:stop": "pm2 stop creatoros-paywall",
+    "pm2:restart": "pm2 restart creatoros-paywall --update-env"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}

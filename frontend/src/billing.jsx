@@ -370,7 +370,7 @@ export function BillingPanel({ durationDays = 30 }) {
         {!enabled
           ? (billing?.billing_preview
             ? "Billing is optional while you test. Packs are preview-only — generation stays open. Turn on a real Stripe key later to charge."
-            : "Same lengths as the campaign picker (14 / 30 / 45 / 60). Leave BILLING_ENFORCE off while testing; turn it on with a valid Stripe secret when you want the paywall.")
+            : "Choose a campaign length that matches your calendar.")
           : subscribed
             ? `Status: ${status}. You can generate calendars up to ${maxDays} days — upgrade if you need a longer run.`
             : `No active pack yet (status: ${status}). Pick the pack that matches your ${durationDays}-day campaign — recommended: ${recommended?.name || "Standard · 30 days"}.`}

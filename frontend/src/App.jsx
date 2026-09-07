@@ -219,9 +219,9 @@ function PageHeading({ eyebrow, title, description, aside }) {
   return (
     <div className="page-heading">
       <div>
-        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+        {eyebrow ? <div className="eyebrow">{eyebrow}</div> : null}
         <h1>{title}</h1>
-        <p>{description}</p>
+        {description ? <p>{description}</p> : null}
       </div>
       {aside}
     </div>
@@ -352,12 +352,11 @@ function HomePage({ currentJob }) {
   return (
     <AppShell flow={false}>
       <PageHeading
-        eyebrow="Home"
         title={`${dayGreeting()}, ${displayName(auth.user)}`}
         description={
           hasCampaign
-            ? "Agency desk: review AI clip picks, approve what ships, and manage the client calendar."
-            : "White-label clip desk for agencies — upload a client podcast, approve AI candidates, brand the outputs."
+            ? "Review clips, approve what ships, and manage the calendar."
+            : "Upload a long-form video to build this month’s content."
         }
         aside={
           <button className="primary-button" onClick={() => navigate("/campaign")}>
@@ -392,28 +391,24 @@ function HomePage({ currentJob }) {
           </div>
         </>
       ) : (
-        <section className="panel home-empty">
-          <span className="overline">Agency wedge</span>
-          <h2>Client podcast in. Approve-ready clips out.</h2>
-          <p>
-            Upload the source file (safest for client work), let AI propose candidates with reasons,
-            then approve what your team would actually publish — with the client’s logo on the end screen.
-          </p>
+        <section className="panel empty-state">
+          <h2>Your workspace is ready</h2>
+          <p>Upload your first long-form video to find clips and build a content calendar.</p>
           <div className="home-actions">
             <button className="home-card" onClick={() => navigate("/campaign")}>
               <Upload size={18} />
-              <strong>Upload client video</strong>
-              <p>Preferred: MP4/MOV from Riverside, Zoom, or Descript.</p>
+              <strong>Upload video</strong>
+              <p>MP4 or MOV from your recorder.</p>
             </button>
             <button className="home-card" onClick={() => navigate("/accounts")}>
               <Link2 size={18} />
               <strong>Connect accounts</strong>
-              <p>Optional — export packages without auto-posting.</p>
+              <p>Optional — connect when you’re ready to publish.</p>
             </button>
             <button className="home-card" onClick={() => navigate("/review")}>
               <ClipboardCheck size={18} />
               <strong>Review board</strong>
-              <p>Human-in-the-loop approval is the product.</p>
+              <p>Approve clips before they go live.</p>
             </button>
           </div>
         </section>
@@ -506,9 +501,8 @@ function ConnectPage({ accounts, refreshAccounts, accountBusy }) {
         />
       )}
       <PageHeading
-        eyebrow="Accounts"
-        title="Connect your publishing channels"
-        description="This is step 1. Connect a channel, or skip and upload a video next."
+        title="Publishing channels"
+        description="Connect a channel now, or skip and upload a video first."
         aside={<div className="linked-count"><strong>{connectedCount}</strong> of 4 linked</div>}
       />
       <section className="next-path">
@@ -699,52 +693,47 @@ function CampaignPage({ campaign, setCampaign }) {
   return (
     <AppShell step="campaign">
       <PageHeading
-        eyebrow="Client source"
-        title="Upload the podcast your agency is editing"
-        description="Prefer a file from Riverside, Zoom, or Descript. YouTube URL is optional and can hit download blocks — upload is the reliable path for client work."
+        title="Add your source video"
+        description="Upload a file, or paste a URL. Leave times blank to process the full video."
       />
       <section className="panel campaign-panel">
         <div className="source-switch">
           <button className={campaign.sourceType === "upload" ? "active" : ""} onClick={() => update("sourceType", "upload")}>
-            <Upload size={17} /> Upload video (recommended)
+            <Upload size={17} /> Upload video
           </button>
           <button className={campaign.sourceType === "url" ? "active" : ""} onClick={() => update("sourceType", "url")}>
-            <Link2 size={17} /> Podcast / YouTube URL
+            <Link2 size={17} /> Video URL
           </button>
         </div>
 
         {campaign.sourceType === "upload" ? (
-          <Field label="Source video" hint="MP4, MOV, MKV, or WebM from a source you own or are licensed to edit." wide>
+          <Field label="Source video" wide>
             <label className={`upload-drop ${uploading ? "busy" : ""}`}>
               <FileVideo size={26} />
               <div>
-                <strong>{campaign.sourceName || "Drop a client video here or browse"}</strong>
-                <span>{uploading ? "Uploading securely…" : "Original file is never overwritten"}</span>
+                <strong>{campaign.sourceName || "Drop a video here or browse"}</strong>
+                <span>{uploading ? "Uploading…" : "MP4, MOV, MKV, or WebM"}</span>
               </div>
               {uploading ? <LoaderCircle className="spin" /> : <Upload size={19} />}
               <input type="file" accept="video/*,.mkv" onChange={(e) => handleFile(e.target.files?.[0])} />
             </label>
           </Field>
         ) : (
-          <Field label="Podcast or YouTube URL" hint="Only use URLs you have rights to. If YouTube blocks the download, switch to Upload." wide>
+          <Field label="Video URL" wide>
             <div className="input-with-icon"><Link2 size={18} /><input value={campaign.source} onChange={(e) => update("source", e.target.value)} placeholder="https://youtube.com/watch?v=…" /></div>
-            <p className="source-legal-note">
-              Third-party YouTube downloads can violate platform rules and fail with 403/token errors.
-              For commercial agency work, upload the client’s master file instead.
-            </p>
           </Field>
         )}
 
         {campaign.sourceType === "url" ? (
           <div className="form-grid timespan-grid">
-            <Field label="Start time (optional)" hint="Skip the long intro — e.g. 12:00 or 1:05:00">
+            <Field label="Start time">
               <input
                 value={campaign.sourceStart || ""}
                 onChange={(e) => update("sourceStart", e.target.value)}
                 placeholder="0:00"
               />
             </Field>
-            <Field label="End time (optional)" hint="Only this window downloads (not the full 2h podcast)">
+            <Field label="End time">
               <input
                 value={campaign.sourceEnd || ""}
                 onChange={(e) => update("sourceEnd", e.target.value)}
@@ -753,7 +742,7 @@ function CampaignPage({ campaign, setCampaign }) {
             </Field>
           </div>
         ) : null}
-        <Field label="What kind of show is this?" hint="Comedy keeps the laugh. Interviews open on the bold line." wide>
+        <Field label="Show type" wide>
         <div className="show-types">
           {SHOW_TYPES.map((item) => (
             <button
@@ -763,17 +752,16 @@ function CampaignPage({ campaign, setCampaign }) {
               onClick={() => update("showType", item.id)}
             >
               <strong>{item.label}</strong>
-              {item.detail ? <span>{item.detail}</span> : null}
             </button>
           ))}
         </div>
         </Field>
 
         <div className="form-grid">
-          <Field label="Client brand name" hint="Used on end screens — swap per client for white-label pilots.">
-            <input value={campaign.brandName} onChange={(e) => update("brandName", e.target.value)} placeholder="Client brand" />
+          <Field label="Brand name">
+            <input value={campaign.brandName} onChange={(e) => update("brandName", e.target.value)} placeholder="Brand name" />
           </Field>
-          <Field label="Website" hint="Optional">
+          <Field label="Website">
             <input value={campaign.website} onChange={(e) => update("website", e.target.value)} placeholder="https://yourbrand.com" />
           </Field>
           <Field label="Primary goal">
@@ -781,20 +769,20 @@ function CampaignPage({ campaign, setCampaign }) {
               <option>Brand awareness</option><option>Lead generation</option><option>Audience growth</option><option>Product education</option><option>Community engagement</option>
             </select>
           </Field>
-          <Field label="Target audience" hint="Be specific enough to shape the writing.">
+          <Field label="Audience">
             <input value={campaign.audience} onChange={(e) => update("audience", e.target.value)} placeholder="Early-stage SaaS founders" />
           </Field>
-          <Field label="Voice and tone">
+          <Field label="Tone">
             <select value={campaign.tone} onChange={(e) => update("tone", e.target.value)}>
               <option>Professional</option><option>Conversational</option><option>Bold</option><option>Educational</option><option>Playful</option>
             </select>
           </Field>
-          <Field label="Campaign duration">
+          <Field label="Duration">
             <select value={campaign.durationDays} onChange={(e) => update("durationDays", Number(e.target.value))}>
               <option value={14}>14 days</option><option value={30}>30 days</option><option value={45}>45 days</option><option value={60}>60 days</option>
             </select>
           </Field>
-          <Field label="Campaign start date">
+          <Field label="Start date">
             <input type="date" value={campaign.startDate} onChange={(e) => update("startDate", e.target.value)} />
           </Field>
         </div>
@@ -887,9 +875,8 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
   return (
     <AppShell step="strategy">
       <PageHeading
-        eyebrow="Content strategy"
-        title="Shape the month before AI starts"
-        description="Tune how many posts each platform gets. Pause a channel later without deleting the campaign."
+        title="Content strategy"
+        description="Choose how many posts each platform gets."
       />
       {needsPaywall ? (
         <div style={{ marginBottom: 18 }}>
@@ -918,27 +905,16 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
           {billingError ? <Notice>{billingError}</Notice> : null}
         </div>
       ) : null}
-      {showPlansTeaser ? (
+      {showPlansTeaser && checkoutReady ? (
         <section className="panel campaign-panel billing-teaser" style={{ marginBottom: 18 }}>
           <div className="section-heading">
             <div>
-              <span className="overline">Billing</span>
-              <h2>
-                {checkoutReady
-                  ? `Covered · up to ${billing.max_campaign_days || "—"} days`
-                  : "Optional packs (testing)"}
-              </h2>
+              <h2>Plan covers up to {billing.max_campaign_days || "—"} days</h2>
             </div>
-            <CreditCard size={18} />
           </div>
-          <p className="account-copy">
-            {checkoutReady
-              ? `Your ${campaign.durationDays}-day campaign fits your plan. Generate when ready.`
-              : "Billing is off while you test — generate freely. Packs are preview-only until Stripe is configured."}
-          </p>
           <div className="page-actions">
             <button className="secondary-button" onClick={() => navigate("/workspace#billing")}>
-              <CreditCard size={16} /> View packs
+              <CreditCard size={16} /> Manage billing
             </button>
           </div>
         </section>
@@ -1134,7 +1110,7 @@ function CalendarMonth({ calendar, holds = {}, onHold, onResume, onPause, onResu
           );
         })}
       </div>
-      <p className="calendar-hint">Open any month. Tap a platform to pause every date, or change a post’s status in the library or on a day — schedule it, hold it, or mark it as won’t post.</p>
+      <p className="calendar-hint">Pause a platform for the month, or change a single post’s status.</p>
       <div className="calendar-legend status-legend">
         <span className="cal-status is-ai">AI generated</span>
         <span className="cal-status is-scheduled">Scheduled</span>
@@ -1338,22 +1314,21 @@ function ProcessingPage({ currentJob, onComplete, plan, setPlan }) {
   return (
     <AppShell step="processing">
       <PageHeading
-        eyebrow="AI agent"
         title={
           status?.status === "stopped"
-            ? "Campaign stopped early"
+            ? "Campaign stopped"
             : status?.status === "completed"
-              ? "Your campaign is ready"
+              ? "Campaign ready"
               : status?.status === "stopping"
-                ? "Winding this campaign down"
-                : "creatorOS is thinking"
+                ? "Stopping campaign"
+                : "Processing"
         }
         description={
           status?.status === "stopped"
-            ? status.message || "CreatorOS kept whatever it already finished and skipped the rest."
+            ? status.message || "Finished work was kept. The rest was skipped."
             : status?.status === "completed"
-              ? "Every asset has been edited, written, scheduled, and packaged."
-              : "Leave this open, stop one platform, or stop the whole run after this step."
+              ? "Assets are edited, written, and packaged."
+              : "You can leave this page open or stop the run anytime."
         }
         aside={
           <div className="heading-actions">
@@ -1484,11 +1459,10 @@ function ProcessingPage({ currentJob, onComplete, plan, setPlan }) {
             </ul>
           </div>
           <div className="panel compact-panel reassurance">
-            <Sparkles size={20} />
-            <h3>Safe to step away</h3>
-            <p>Your job continues on the backend. Return with this campaign link anytime.</p>
+            <h3>Safe to leave</h3>
+            <p>Processing continues in the background.</p>
             <button className="secondary-button full" onClick={() => navigator.clipboard?.writeText(window.location.href)}>
-              <Link2 size={16} /> Copy campaign link
+              <Link2 size={16} /> Copy link
             </button>
           </div>
         </aside>
@@ -1702,15 +1676,18 @@ function CompletionPage({ currentJob }) {
       <section className="next-step-card">
         <div>
           <span className="overline">What happens next</span>
-          <h2>Review, approve, then publish</h2>
+          <h2>Approve on Review, then use Library</h2>
           <p>
-            Campaign Library contains every video and post. Nothing publishes
-            until you approve it.
+            Review is where you approve or reject clips. Library is for browsing,
+            copying posts, and downloading the pack.
           </p>
         </div>
         <div>
-          <button className="primary-button" onClick={() => navigate(`/results/${resolvedJob}`)}>
-            Review all assets <ArrowRight size={17} />
+          <button className="primary-button" onClick={() => navigate("/review")}>
+            Open Review <ArrowRight size={17} />
+          </button>
+          <button className="secondary-button" onClick={() => navigate(`/results/${resolvedJob}`)}>
+            Open Library
           </button>
           <button className="secondary-button" onClick={() => navigate("/campaign")}>
             <Plus size={16} /> Create another campaign
@@ -1729,74 +1706,10 @@ function ResultsPage({ currentJob }) {
   const [error, setError] = useState("");
   const [activePlatform, setActivePlatform] = useState("all");
   const [deckPlatform, setDeckPlatform] = useState("");
-  const [holds, setHolds] = useState({});
-  const [statusBusy, setStatusBusy] = useState("");
-
-  const loadBoard = () =>
-    creatorApi.board().then((data) => {
-      setBoard(data);
-      setHolds(data.holds || data.calendar?.holds || {});
-    }).catch((err) => setError(err.message));
 
   useEffect(() => {
-    loadBoard();
+    creatorApi.board().then(setBoard).catch((err) => setError(err.message));
   }, []);
-
-  const applyHold = async (platform, resume = false, year, month) => {
-    try {
-      resume
-        ? await creatorApi.resumePlatform(platform, year, month)
-        : await creatorApi.holdPlatform(platform, year, month);
-      await loadBoard();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-  const skipItem = async (itemId, year, month) => {
-    try {
-      await creatorApi.skipPost(itemId, year, month);
-      await loadBoard();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-  const pauseItem = async (itemId, year, month) => {
-    try {
-      await creatorApi.pausePost(itemId, year, month);
-      await loadBoard();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-  const resumeItem = async (itemId, year, month) => {
-    try {
-      await creatorApi.resumePost(itemId, year, month);
-      await loadBoard();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-  const setItemStatus = async (itemId, status, year, month) => {
-    setStatusBusy(itemId);
-    try {
-      const data = await creatorApi.setPostStatus(itemId, status, year, month);
-      setBoard((prev) => ({
-        ...(prev || {}),
-        items: (prev?.items || []).map((item) =>
-          item.id === itemId ? { ...item, status: data.status || status } : item
-        ),
-        calendar: data.calendar || prev?.calendar,
-        holds: data.holds || prev?.holds,
-      }));
-      setHolds(data.holds || {});
-      await loadBoard();
-      setError("");
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setStatusBusy("");
-    }
-  };
 
   const items = board?.items || [];
   const platforms = [...new Set(items.map((item) => item.assigned_platform).filter(Boolean))];
@@ -1809,13 +1722,12 @@ function ResultsPage({ currentJob }) {
   return (
     <AppShell flow={false}>
       <PageHeading
-        eyebrow="Library"
-        title="Your campaign assets"
-        description="Preview 9:16 cuts with quality signals, then approve on the Review board before treating them as scheduled."
+        title="Library"
+        description="Browse videos, copy posts, and download the campaign pack."
         aside={
           <div className="heading-actions">
             <button className="secondary-button" onClick={() => navigate("/review")}>
-              <ClipboardCheck size={16} /> Review board
+              <ClipboardCheck size={16} /> Approve on Review
             </button>
             <button
               className="secondary-button"
@@ -1856,16 +1768,6 @@ function ResultsPage({ currentJob }) {
         <div className="loading-state"><LoaderCircle className="spin" /><span>Loading campaign assets…</span></div>
       ) : (
         <>
-          <div className="library-status-intro">
-            <p className="asset-copy-hint">
-              Same statuses as the calendar. On each clip, choose whether it should actually post, wait, or not go out.
-            </p>
-            <div className="calendar-legend status-legend">
-              {POST_STATUSES.map((row) => (
-                <span className={`cal-status is-${row.tone}`} key={row.id}>{row.label}</span>
-              ))}
-            </div>
-          </div>
           <div className="asset-grid">
           {visible.map((item, index) => (
             <article className="asset-card" key={item.id || `${item.assigned_platform}-${index}`}>
@@ -1873,13 +1775,6 @@ function ResultsPage({ currentJob }) {
                 <div className="asset-meta">
                   <span>{item.package_label || "Platform cut"}</span>
                   <span>{item.scheduled_date || "Queued"}</span>
-                </div>
-                <div className="asset-status-row">
-                  <StatusSelect
-                    value={item.status}
-                    disabled={!item.id || statusBusy === item.id}
-                    onChange={(status) => setItemStatus(item.id, status)}
-                  />
                 </div>
               </div>
               {item.play_url ? (
@@ -1942,16 +1837,6 @@ function ResultsPage({ currentJob }) {
                 <pre className="post-markdown">{decks[currentDeck]}</pre>
               </section>
           )}
-          <CalendarMonth
-            calendar={board.calendar}
-            holds={holds}
-            onHold={(platform, year, month) => applyHold(platform, false, year, month)}
-            onResume={(platform, year, month) => applyHold(platform, true, year, month)}
-            onPause={pauseItem}
-            onResumeItem={resumeItem}
-            onSkip={skipItem}
-            onStatus={setItemStatus}
-          />
         </>
       )}
     </AppShell>
@@ -1987,9 +1872,8 @@ function CalendarStudio() {
   return (
     <AppShell flow={false}>
       <PageHeading
-        eyebrow="Posting"
-        title="This month, on your terms"
-        description="Clips are already made. Pause a whole platform or any single date — nothing is deleted, and you can resume anytime."
+        title="This month"
+        description="Pause a platform or any date. Resume anytime — nothing is deleted."
         aside={busy ? <LoaderCircle className="spin" size={18} /> : null}
       />
       {error && <Notice>{error}</Notice>}
@@ -2103,9 +1987,8 @@ function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign, ca
   return (
     <AppShell flow={false}>
       <PageHeading
-        eyebrow="Billing & settings"
-        title="Plans and workspace"
-        description="Campaign packs match 14 / 30 / 45 / 60-day calendars. Manage branding and accounts here too."
+        title="Billing & settings"
+        description="Manage your plan, branding, and connected accounts."
       />
       <BillingPanel durationDays={campaign?.durationDays || 30} />
       <section className="panel campaign-panel" style={{ marginTop: 18 }}>
@@ -2335,16 +2218,14 @@ function AuthScreen() {
         </div>
         <Logo />
         <div className="auth-copy">
-          <div className="eyebrow">CREATE · REPURPOSE · SCHEDULE</div>
           <h1>One video.<br />A month of content.</h1>
           <p>
-            Upload one podcast, interview, or long-form video. creatorOS turns it
-            into platform-ready Shorts, Reels, LinkedIn posts, and a complete 30-day calendar.
+            Turn a podcast or long-form talk into Shorts, Reels, LinkedIn, and X — with a calendar you control.
           </p>
           <div className="auth-benefits">
-            <span><CheckCircle2 /> Turn one video into weeks of content</span>
-            <span><CheckCircle2 /> Generate once, post across every platform</span>
-            <span><CheckCircle2 /> Control your entire content calendar</span>
+            <span><CheckCircle2 /> Multi-platform clips from one source</span>
+            <span><CheckCircle2 /> Calendar you can pause anytime</span>
+            <span><CheckCircle2 /> Nothing publishes until you approve</span>
           </div>
         </div>
         <AuthProductPreview />
