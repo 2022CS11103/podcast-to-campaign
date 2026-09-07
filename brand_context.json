@@ -1,0 +1,17 @@
+{
+  "brand_name": "Radiant Minds",
+  "website": "radiantmindsma.com",
+  "tagline": "“Hope” is the thing with feathers - That perches in the soul - And sings the tune without the words - And never stops - at all",
+  "goal": "Brand awareness",
+  "audience": "Startup founders",
+  "tone": "Professional",
+  "show_type": "interview",
+  "campaign_duration_days": 30,
+  "campaign_start_date": "2026-09-01",
+  "logo_path": "input/brand/logo_969e8041792e4deeb092103a95fc9132.png",
+  "end_screen_enabled": true,
+  "end_screen_duration": 3,
+  "end_screen_template": "logo_name_website",
+  "end_screen_cta": "",
+  "on_screen_captions_enabled": true
+}

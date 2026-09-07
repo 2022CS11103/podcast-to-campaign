@@ -10,5 +10,10 @@
     "shorts_folder": "output/final_shorts",
     "editing_completed": true,
     "marketing_folder": "output",
-    "marketing_completed": true
+    "marketing_completed": true,
+    "edit_quality": {
+        "average_score": 100,
+        "passed": 10,
+        "failed": 0
+    }
 }

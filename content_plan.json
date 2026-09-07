@@ -1,6 +1,22 @@
 {
-  "instagram_reels": { "count": 3, "interval_days": 2 },
-  "youtube_shorts": { "count": 2, "interval_days": 3 },
-  "linkedin": { "count": 2, "interval_days": 7 },
-  "twitter": { "count": 1, "interval_days": 4 }
+  "instagram_reels": {
+    "count": 5,
+    "interval_days": 5,
+    "purpose": "Build reach"
+  },
+  "youtube_shorts": {
+    "count": 5,
+    "interval_days": 4,
+    "purpose": "Grow subscribers"
+  },
+  "linkedin": {
+    "count": 5,
+    "interval_days": 3,
+    "purpose": "Build authority"
+  },
+  "twitter": {
+    "count": 7,
+    "interval_days": 2,
+    "purpose": "Start conversations"
+  }
 }
