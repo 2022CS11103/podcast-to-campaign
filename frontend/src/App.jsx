@@ -15,8 +15,10 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ClipboardCheck,
   Clock3,
   Copy,
+  CreditCard,
   Download,
   FileText,
   FileVideo,
@@ -32,7 +34,6 @@ import {
   Plus,
   RefreshCw,
   Rocket,
-  Settings2,
   Sparkles,
   Square,
   Trash2,
@@ -43,6 +44,9 @@ import {
 import { BrandingFields, brandPayloadFromForm, formFromBrand } from "./branding";
 import { BrandIcon } from "./BrandIcon";
 import { AuthProvider, useAuth } from "./auth";
+import { BillingPanel, PaywallCard, checkoutIsReady, paywallActive, recommendPlan, useBilling } from "./billing";
+import { QualityChips, ReviewPage } from "./review";
+import { TranscriptPage } from "./transcript";
 import { apiUrl, creatorApi } from "./api";
 import {
   DEFAULT_CAMPAIGN,
@@ -115,9 +119,11 @@ function AppShell({ children, step, flow = true }) {
     { to: "/", label: "Home", icon: Home, active: path === "/" },
     { to: "/campaign", label: "Content", icon: Film, active: path.startsWith("/campaign") || path.startsWith("/strategy") || path.startsWith("/processing") },
     { to: "/calendar", label: "Calendar", icon: CalendarDays, active: path.startsWith("/calendar") },
+    { to: "/review", label: "Review", icon: ClipboardCheck, active: path.startsWith("/review") },
+    { to: "/transcript", label: "Transcript", icon: FileText, active: path.startsWith("/transcript") },
     { to: "/results/latest", label: "Library", icon: BarChart3, active: path.startsWith("/results") || path.startsWith("/complete") },
     { to: "/accounts", label: "Accounts", icon: Link2, active: path.startsWith("/accounts") },
-    { to: "/workspace", label: "Settings", icon: Settings2, active: path.startsWith("/workspace") },
+    { to: "/workspace", label: "Settings", icon: CreditCard, active: path.startsWith("/workspace") },
   ];
 
   return (
@@ -213,9 +219,9 @@ function PageHeading({ eyebrow, title, description, aside }) {
   return (
     <div className="page-heading">
       <div>
-        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+        {eyebrow ? <div className="eyebrow">{eyebrow}</div> : null}
         <h1>{title}</h1>
-        <p>{description}</p>
+        {description ? <p>{description}</p> : null}
       </div>
       {aside}
     </div>
@@ -283,19 +289,20 @@ function itemPostText(item) {
 }
 
 const POST_STATUSES = [
-  { id: "ai_generated", label: "AI generated", tone: "ai" },
-  { id: "scheduled", label: "Scheduled", tone: "scheduled" },
-  { id: "paused", label: "Needs review / paused", tone: "review" },
+  { id: "ai_generated", label: "Needs approval", tone: "ai" },
+  { id: "scheduled", label: "Approved / scheduled", tone: "scheduled" },
+  { id: "paused", label: "Paused", tone: "review" },
   { id: "posted", label: "Published", tone: "published" },
-  { id: "skipped", label: "Won't post", tone: "failed" },
+  { id: "skipped", label: "Rejected / won't post", tone: "failed" },
 ];
 
 function normalizePostStatus(status) {
-  const raw = String(status || "pending").toLowerCase().replace(/[\s'-]+/g, "_");
-  if (["skipped", "wont_post", "cancelled", "canceled"].includes(raw)) return "skipped";
+  const raw = String(status || "ai_generated").toLowerCase().replace(/[\s'-]+/g, "_");
+  if (["skipped", "wont_post", "cancelled", "canceled", "rejected", "reject"].includes(raw)) return "skipped";
   if (["posted", "published"].includes(raw)) return "posted";
   if (["paused", "review", "needs_review", "needs_review_paused"].includes(raw)) return "paused";
-  if (["ai_generated", "generated", "draft"].includes(raw)) return "ai_generated";
+  if (["ai_generated", "generated", "draft", "pending", "needs_approval"].includes(raw)) return "ai_generated";
+  if (["approved", "approve"].includes(raw)) return "scheduled";
   return "scheduled";
 }
 
@@ -345,12 +352,11 @@ function HomePage({ currentJob }) {
   return (
     <AppShell flow={false}>
       <PageHeading
-        eyebrow="Home"
         title={`${dayGreeting()}, ${displayName(auth.user)}`}
         description={
           hasCampaign
-            ? "Your content this month — plan, edit, and schedule from here."
-            : "Turn one video into a month of content. Create once. Repurpose everywhere."
+            ? "Review clips, approve what ships, and manage the calendar."
+            : "Upload a long-form video to build this month’s content."
         }
         aside={
           <button className="primary-button" onClick={() => navigate("/campaign")}>
@@ -363,47 +369,46 @@ function HomePage({ currentJob }) {
           <div className="result-kpis">
             <div><Play size={19} /><span>Shorts</span><strong>{board?.video_renders ?? "—"}</strong></div>
             <div><Film size={19} /><span>Posts</span><strong>{summary.total_content_pieces || items.length || "—"}</strong></div>
-            <div><CalendarDays size={19} /><span>Scheduled</span><strong>{board?.calendar?.total_posts || items.length || "—"}</strong></div>
+            <div><ClipboardCheck size={19} /><span>Needs approval</span><strong>{board?.needs_review_count ?? items.filter((i) => normalizePostStatus(i.status) === "ai_generated").length}</strong></div>
             <div><Clock3 size={19} /><span>This run</span><strong>{summary.processing_human || "—"}</strong></div>
           </div>
           <div className="home-actions">
+            <button className="home-card" onClick={() => navigate("/review")}>
+              <ClipboardCheck size={18} />
+              <strong>Review board</strong>
+              <p>Approve or reject AI clip candidates with reasons.</p>
+            </button>
             <button className="home-card" onClick={() => navigate(currentJob ? `/results/${currentJob}` : "/results/latest")}>
               <Film size={18} />
               <strong>Open library</strong>
-              <p>Review clips, captions, and downloads.</p>
+              <p>Preview cuts, captions, and downloads.</p>
             </button>
             <button className="home-card" onClick={() => navigate("/calendar")}>
               <CalendarDays size={18} />
               <strong>Content calendar</strong>
               <p>Pause a platform or any date.</p>
             </button>
-            <button className="home-card" onClick={() => navigate("/accounts")}>
-              <Link2 size={18} />
-              <strong>Connected accounts</strong>
-              <p>YouTube, Instagram, LinkedIn, and X.</p>
-            </button>
           </div>
         </>
       ) : (
-        <section className="panel home-empty">
-          <span className="overline">Get started</span>
-          <h2>One video. A month of content.</h2>
-          <p>Upload a talk or podcast and creatorOS will plan, edit, and schedule across every platform.</p>
+        <section className="panel empty-state">
+          <h2>Your workspace is ready</h2>
+          <p>Upload your first long-form video to find clips and build a content calendar.</p>
           <div className="home-actions">
             <button className="home-card" onClick={() => navigate("/campaign")}>
               <Upload size={18} />
-              <strong>Upload a video</strong>
-              <p>Paste a YouTube link or drop a file.</p>
+              <strong>Upload video</strong>
+              <p>MP4 or MOV from your recorder.</p>
             </button>
             <button className="home-card" onClick={() => navigate("/accounts")}>
               <Link2 size={18} />
               <strong>Connect accounts</strong>
-              <p>Optional — you can generate without connecting.</p>
+              <p>Optional — connect when you’re ready to publish.</p>
             </button>
-            <button className="home-card" onClick={() => navigate("/calendar")}>
-              <CalendarDays size={18} />
-              <strong>See the calendar</strong>
-              <p>Your month of posts will land here.</p>
+            <button className="home-card" onClick={() => navigate("/review")}>
+              <ClipboardCheck size={18} />
+              <strong>Review board</strong>
+              <p>Approve clips before they go live.</p>
             </button>
           </div>
         </section>
@@ -496,9 +501,8 @@ function ConnectPage({ accounts, refreshAccounts, accountBusy }) {
         />
       )}
       <PageHeading
-        eyebrow="Accounts"
-        title="Connect your publishing channels"
-        description="This is step 1. Connect a channel, or skip and upload a video next."
+        title="Publishing channels"
+        description="Connect a channel now, or skip and upload a video first."
         aside={<div className="linked-count"><strong>{connectedCount}</strong> of 4 linked</div>}
       />
       <section className="next-path">
@@ -612,9 +616,16 @@ function CampaignPage({ campaign, setCampaign }) {
     creatorApi.getBrand().then((brand) => {
       setCampaign((current) => ({
         ...current,
+        brandName: current.brandName && current.brandName !== "CreatorOS"
+          ? current.brandName
+          : (brand.brand_name || current.brandName || ""),
+        website: current.website || brand.website || "",
         hasLogo: Boolean(brand.has_logo),
         logoCache: Date.now(),
         tagline: current.tagline || brand.tagline || "",
+        endScreenEnabled: Boolean(
+          current.endScreenEnabled || brand.end_screen_enabled
+        ),
         endScreenCta: current.endScreenCta || brand.end_screen_cta || "",
         endScreenTemplate: current.endScreenTemplate || brand.end_screen_template || "logo_name_website",
         endScreenDuration: current.endScreenDuration || brand.end_screen_duration || 3,
@@ -682,39 +693,56 @@ function CampaignPage({ campaign, setCampaign }) {
   return (
     <AppShell step="campaign">
       <PageHeading
-        eyebrow="Content"
-        title="Turn one video into a month of content"
-        description="Upload your podcast and let creatorOS plan, edit, and schedule across every platform."
+        title="Add your source video"
+        description="Upload a file, or paste a URL. Leave times blank to process the full video."
       />
       <section className="panel campaign-panel">
         <div className="source-switch">
-          <button className={campaign.sourceType === "url" ? "active" : ""} onClick={() => update("sourceType", "url")}>
-            <Link2 size={17} /> Podcast / YouTube URL
-          </button>
           <button className={campaign.sourceType === "upload" ? "active" : ""} onClick={() => update("sourceType", "upload")}>
             <Upload size={17} /> Upload video
           </button>
+          <button className={campaign.sourceType === "url" ? "active" : ""} onClick={() => update("sourceType", "url")}>
+            <Link2 size={17} /> Video URL
+          </button>
         </div>
 
-        {campaign.sourceType === "url" ? (
-          <Field label="Podcast or YouTube URL" hint="Paste a public episode or video link. If YouTube blocks the download, switch to Upload video." wide>
-            <div className="input-with-icon"><Link2 size={18} /><input value={campaign.source} onChange={(e) => update("source", e.target.value)} placeholder="https://youtube.com/watch?v=…" /></div>
-          </Field>
-        ) : (
-          <Field label="Source video" hint="MP4, MOV, MKV, or WebM. Large files may take a moment to upload." wide>
+        {campaign.sourceType === "upload" ? (
+          <Field label="Source video" wide>
             <label className={`upload-drop ${uploading ? "busy" : ""}`}>
               <FileVideo size={26} />
               <div>
                 <strong>{campaign.sourceName || "Drop a video here or browse"}</strong>
-                <span>{uploading ? "Uploading securely…" : "Your original is never modified"}</span>
+                <span>{uploading ? "Uploading…" : "MP4, MOV, MKV, or WebM"}</span>
               </div>
               {uploading ? <LoaderCircle className="spin" /> : <Upload size={19} />}
               <input type="file" accept="video/*,.mkv" onChange={(e) => handleFile(e.target.files?.[0])} />
             </label>
           </Field>
+        ) : (
+          <Field label="Video URL" wide>
+            <div className="input-with-icon"><Link2 size={18} /><input value={campaign.source} onChange={(e) => update("source", e.target.value)} placeholder="https://youtube.com/watch?v=…" /></div>
+          </Field>
         )}
 
-        <Field label="What kind of show is this?" hint="Comedy keeps the laugh. Interviews open on the bold line." wide>
+        {campaign.sourceType === "url" ? (
+          <div className="form-grid timespan-grid">
+            <Field label="Start time">
+              <input
+                value={campaign.sourceStart || ""}
+                onChange={(e) => update("sourceStart", e.target.value)}
+                placeholder="0:00"
+              />
+            </Field>
+            <Field label="End time">
+              <input
+                value={campaign.sourceEnd || ""}
+                onChange={(e) => update("sourceEnd", e.target.value)}
+                placeholder="25:30"
+              />
+            </Field>
+          </div>
+        ) : null}
+        <Field label="Show type" wide>
         <div className="show-types">
           {SHOW_TYPES.map((item) => (
             <button
@@ -724,7 +752,6 @@ function CampaignPage({ campaign, setCampaign }) {
               onClick={() => update("showType", item.id)}
             >
               <strong>{item.label}</strong>
-              {item.detail ? <span>{item.detail}</span> : null}
             </button>
           ))}
         </div>
@@ -732,9 +759,9 @@ function CampaignPage({ campaign, setCampaign }) {
 
         <div className="form-grid">
           <Field label="Brand name">
-            <input value={campaign.brandName} onChange={(e) => update("brandName", e.target.value)} placeholder="CreatorOS" />
+            <input value={campaign.brandName} onChange={(e) => update("brandName", e.target.value)} placeholder="Brand name" />
           </Field>
-          <Field label="Website" hint="Optional">
+          <Field label="Website">
             <input value={campaign.website} onChange={(e) => update("website", e.target.value)} placeholder="https://yourbrand.com" />
           </Field>
           <Field label="Primary goal">
@@ -742,20 +769,20 @@ function CampaignPage({ campaign, setCampaign }) {
               <option>Brand awareness</option><option>Lead generation</option><option>Audience growth</option><option>Product education</option><option>Community engagement</option>
             </select>
           </Field>
-          <Field label="Target audience" hint="Be specific enough to shape the writing.">
+          <Field label="Audience">
             <input value={campaign.audience} onChange={(e) => update("audience", e.target.value)} placeholder="Early-stage SaaS founders" />
           </Field>
-          <Field label="Voice and tone">
+          <Field label="Tone">
             <select value={campaign.tone} onChange={(e) => update("tone", e.target.value)}>
               <option>Professional</option><option>Conversational</option><option>Bold</option><option>Educational</option><option>Playful</option>
             </select>
           </Field>
-          <Field label="Campaign duration">
+          <Field label="Duration">
             <select value={campaign.durationDays} onChange={(e) => update("durationDays", Number(e.target.value))}>
               <option value={14}>14 days</option><option value={30}>30 days</option><option value={45}>45 days</option><option value={60}>60 days</option>
             </select>
           </Field>
-          <Field label="Campaign start date">
+          <Field label="Start date">
             <input type="date" value={campaign.startDate} onChange={(e) => update("startDate", e.target.value)} />
           </Field>
         </div>
@@ -824,6 +851,7 @@ function Counter({ value, onChange, min = 0, max = 30 }) {
 
 function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
   const navigate = useNavigate();
+  const { billing, loading: billingLoading, busy, startCheckout, error: billingError } = useBilling();
   const platformNames = {
     instagram_reels: "Instagram Reels",
     youtube_shorts: "YouTube Shorts",
@@ -832,14 +860,55 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
   };
   const totals = Object.values(plan).filter((item) => item.enabled).reduce((sum, item) => sum + item.count, 0);
   const update = (key, patch) => setPlan((current) => ({ ...current, [key]: { ...current[key], ...patch } }));
+  const checkoutReady = checkoutIsReady(billing);
+  const needsPaywall = paywallActive(billing);
+  const durationCapped = Boolean(
+    checkoutReady
+    && billing?.entitled
+    && Number(billing?.max_campaign_days || 0) > 0
+    && Number(campaign.durationDays) > Number(billing.max_campaign_days)
+  );
+  const plans = billing?.plans || [];
+  const blockGenerate = needsPaywall || durationCapped;
+  const demoNote = billing?.demo_remaining === 1
+    ? "One free demo left on this email."
+    : billing?.demo_exhausted
+      ? "Free demo used — pay to continue."
+      : null;
 
   return (
     <AppShell step="strategy">
       <PageHeading
-        eyebrow="Content strategy"
-        title="Shape the month before AI starts"
-        description="Tune how many posts each platform gets. Pause a channel later without deleting the campaign."
+        title="Content strategy"
+        description="Choose how many posts each platform gets."
       />
+      {needsPaywall ? (
+        <div style={{ marginBottom: 18 }}>
+          <PaywallCard
+            title="You've used your free demo"
+            busy={busy || billingLoading}
+            billingEnabled={checkoutReady}
+            plans={plans}
+            durationDays={campaign.durationDays}
+            onUpgrade={(priceId, days) => startCheckout(priceId, days || campaign.durationDays)}
+            description={billing?.message || "Pay to unlock another campaign — Shorts, Reels, LinkedIn/X copy, and the calendar."}
+          />
+          {billingError ? <Notice>{billingError}</Notice> : null}
+        </div>
+      ) : null}
+      {durationCapped ? (
+        <div style={{ marginBottom: 18 }}>
+          <PaywallCard
+            title="Upgrade for a longer calendar"
+            busy={busy || billingLoading}
+            billingEnabled={checkoutReady}
+            plans={plans}
+            durationDays={campaign.durationDays}
+            onUpgrade={(priceId, days) => startCheckout(priceId, days || campaign.durationDays)}
+            description={`Your plan covers up to ${billing.max_campaign_days} days. This campaign is ${campaign.durationDays} days — upgrade the pack or shorten the duration.`}
+          />
+        </div>
+      ) : null}
       <div className="strategy-layout">
         <div className="strategy-grid">
           {Object.entries(plan).map(([key, item]) => {
@@ -866,6 +935,7 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
         <aside className="summary-card">
           <div className="summary-title"><Sparkles size={19} /><span>Campaign snapshot</span></div>
           <div className="summary-duration"><span>Duration</span><strong>{campaign.durationDays} days</strong></div>
+          {demoNote ? <p className="account-copy" style={{ marginTop: 8 }}>{demoNote}</p> : null}
           <div className="summary-list">
             {Object.entries(plan).filter(([, item]) => item.enabled).map(([key, item]) => (
               <div key={key}><span>{platformNames[key]}</span><strong>{item.count}</strong></div>
@@ -876,11 +946,14 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
             <div><Clock3 size={16} /><span>Estimated processing</span><strong>8–15 min</strong></div>
             <div><Film size={16} /><span>Distinct video edits</span><strong>{(plan.youtube_shorts.enabled ? plan.youtube_shorts.count : 0) + (plan.instagram_reels.enabled ? plan.instagram_reels.count : 0)}</strong></div>
           </div>
-          <button className="primary-button full" onClick={onGenerate} disabled={generating || !campaign.source}>
+          <button
+            className="primary-button full"
+            onClick={onGenerate}
+            disabled={generating || !campaign.source || blockGenerate}
+          >
             {generating ? <LoaderCircle className="spin" size={18} /> : <Rocket size={18} />}
-            {generating ? "Starting campaign…" : "Generate AI campaign"}
+            {needsPaywall ? "Pay to generate" : generating ? "Starting campaign…" : "Generate AI campaign"}
           </button>
-          <p className="privacy-note">You stay in control. CreatorOS prepares drafts and private uploads only.</p>
         </aside>
       </div>
       <div className="page-actions">
@@ -1017,7 +1090,7 @@ function CalendarMonth({ calendar, holds = {}, onHold, onResume, onPause, onResu
           );
         })}
       </div>
-      <p className="calendar-hint">Open any month. Tap a platform to pause every date, or change a post’s status in the library or on a day — schedule it, hold it, or mark it as won’t post.</p>
+      <p className="calendar-hint">Pause a platform for the month, or change a single post’s status.</p>
       <div className="calendar-legend status-legend">
         <span className="cal-status is-ai">AI generated</span>
         <span className="cal-status is-scheduled">Scheduled</span>
@@ -1221,22 +1294,21 @@ function ProcessingPage({ currentJob, onComplete, plan, setPlan }) {
   return (
     <AppShell step="processing">
       <PageHeading
-        eyebrow="AI agent"
         title={
           status?.status === "stopped"
-            ? "Campaign stopped early"
+            ? "Campaign stopped"
             : status?.status === "completed"
-              ? "Your campaign is ready"
+              ? "Campaign ready"
               : status?.status === "stopping"
-                ? "Winding this campaign down"
-                : "creatorOS is thinking"
+                ? "Stopping campaign"
+                : "Processing"
         }
         description={
           status?.status === "stopped"
-            ? status.message || "CreatorOS kept whatever it already finished and skipped the rest."
+            ? status.message || "Finished work was kept. The rest was skipped."
             : status?.status === "completed"
-              ? "Every asset has been edited, written, scheduled, and packaged."
-              : "Leave this open, stop one platform, or stop the whole run after this step."
+              ? "Assets are edited, written, and packaged."
+              : "You can leave this page open or stop the run anytime."
         }
         aside={
           <div className="heading-actions">
@@ -1367,11 +1439,10 @@ function ProcessingPage({ currentJob, onComplete, plan, setPlan }) {
             </ul>
           </div>
           <div className="panel compact-panel reassurance">
-            <Sparkles size={20} />
-            <h3>Safe to step away</h3>
-            <p>Your job continues on the backend. Return with this campaign link anytime.</p>
+            <h3>Safe to leave</h3>
+            <p>Processing continues in the background.</p>
             <button className="secondary-button full" onClick={() => navigator.clipboard?.writeText(window.location.href)}>
-              <Link2 size={16} /> Copy campaign link
+              <Link2 size={16} /> Copy link
             </button>
           </div>
         </aside>
@@ -1464,15 +1535,18 @@ function CompletionPage({ currentJob }) {
         <div className="completion-burst"><Check size={34} /></div>
         <div>
           <div className="eyebrow">Campaign complete</div>
-          <h1>Your content engine is ready</h1>
+          <h1>Drafts ready — approve before anything ships</h1>
           <p>
-            Everything is generated and dated. Pause a platform or a single date
-            any time this month — the rest of the campaign keeps moving.
+            AI proposed the clips and platform copy. Open the review board, approve what your
+            agency would publish, reject the rest. Calendar stays honest about what’s approved.
           </p>
         </div>
         <div className="completion-actions">
-          <button className="primary-button" onClick={() => navigate(`/results/${resolvedJob}`)}>
-            Open campaign library <ArrowRight size={17} />
+          <button className="primary-button" onClick={() => navigate("/review")}>
+            Review & approve clips <ArrowRight size={17} />
+          </button>
+          <button className="secondary-button" onClick={() => navigate(`/results/${resolvedJob}`)}>
+            Open campaign library
           </button>
           <button className="secondary-button" onClick={() => navigate("/calendar")}>
             <CalendarDays size={16} /> Manage posting
@@ -1582,15 +1656,18 @@ function CompletionPage({ currentJob }) {
       <section className="next-step-card">
         <div>
           <span className="overline">What happens next</span>
-          <h2>Review, approve, then publish</h2>
+          <h2>Approve on Review, then use Library</h2>
           <p>
-            Campaign Library contains every video and post. Nothing publishes
-            until you approve it.
+            Review is where you approve or reject clips. Library is for browsing,
+            copying posts, and downloading the pack.
           </p>
         </div>
         <div>
-          <button className="primary-button" onClick={() => navigate(`/results/${resolvedJob}`)}>
-            Review all assets <ArrowRight size={17} />
+          <button className="primary-button" onClick={() => navigate("/review")}>
+            Open Review <ArrowRight size={17} />
+          </button>
+          <button className="secondary-button" onClick={() => navigate(`/results/${resolvedJob}`)}>
+            Open Library
           </button>
           <button className="secondary-button" onClick={() => navigate("/campaign")}>
             <Plus size={16} /> Create another campaign
@@ -1609,74 +1686,10 @@ function ResultsPage({ currentJob }) {
   const [error, setError] = useState("");
   const [activePlatform, setActivePlatform] = useState("all");
   const [deckPlatform, setDeckPlatform] = useState("");
-  const [holds, setHolds] = useState({});
-  const [statusBusy, setStatusBusy] = useState("");
-
-  const loadBoard = () =>
-    creatorApi.board().then((data) => {
-      setBoard(data);
-      setHolds(data.holds || data.calendar?.holds || {});
-    }).catch((err) => setError(err.message));
 
   useEffect(() => {
-    loadBoard();
+    creatorApi.board().then(setBoard).catch((err) => setError(err.message));
   }, []);
-
-  const applyHold = async (platform, resume = false, year, month) => {
-    try {
-      resume
-        ? await creatorApi.resumePlatform(platform, year, month)
-        : await creatorApi.holdPlatform(platform, year, month);
-      await loadBoard();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-  const skipItem = async (itemId, year, month) => {
-    try {
-      await creatorApi.skipPost(itemId, year, month);
-      await loadBoard();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-  const pauseItem = async (itemId, year, month) => {
-    try {
-      await creatorApi.pausePost(itemId, year, month);
-      await loadBoard();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-  const resumeItem = async (itemId, year, month) => {
-    try {
-      await creatorApi.resumePost(itemId, year, month);
-      await loadBoard();
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-  const setItemStatus = async (itemId, status, year, month) => {
-    setStatusBusy(itemId);
-    try {
-      const data = await creatorApi.setPostStatus(itemId, status, year, month);
-      setBoard((prev) => ({
-        ...(prev || {}),
-        items: (prev?.items || []).map((item) =>
-          item.id === itemId ? { ...item, status: data.status || status } : item
-        ),
-        calendar: data.calendar || prev?.calendar,
-        holds: data.holds || prev?.holds,
-      }));
-      setHolds(data.holds || {});
-      await loadBoard();
-      setError("");
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setStatusBusy("");
-    }
-  };
 
   const items = board?.items || [];
   const platforms = [...new Set(items.map((item) => item.assigned_platform).filter(Boolean))];
@@ -1689,11 +1702,13 @@ function ResultsPage({ currentJob }) {
   return (
     <AppShell flow={false}>
       <PageHeading
-        eyebrow="Library"
-        title="Your campaign assets"
-        description="Preview the 9:16 cuts, copy the markdown, and set each post to scheduled, paused, or won’t post."
+        title="Library"
+        description="Browse videos, copy posts, and download the campaign pack."
         aside={
           <div className="heading-actions">
+            <button className="secondary-button" onClick={() => navigate("/review")}>
+              <ClipboardCheck size={16} /> Approve on Review
+            </button>
             <button
               className="secondary-button"
               onClick={() =>
@@ -1733,16 +1748,6 @@ function ResultsPage({ currentJob }) {
         <div className="loading-state"><LoaderCircle className="spin" /><span>Loading campaign assets…</span></div>
       ) : (
         <>
-          <div className="library-status-intro">
-            <p className="asset-copy-hint">
-              Same statuses as the calendar. On each clip, choose whether it should actually post, wait, or not go out.
-            </p>
-            <div className="calendar-legend status-legend">
-              {POST_STATUSES.map((row) => (
-                <span className={`cal-status is-${row.tone}`} key={row.id}>{row.label}</span>
-              ))}
-            </div>
-          </div>
           <div className="asset-grid">
           {visible.map((item, index) => (
             <article className="asset-card" key={item.id || `${item.assigned_platform}-${index}`}>
@@ -1750,13 +1755,6 @@ function ResultsPage({ currentJob }) {
                 <div className="asset-meta">
                   <span>{item.package_label || "Platform cut"}</span>
                   <span>{item.scheduled_date || "Queued"}</span>
-                </div>
-                <div className="asset-status-row">
-                  <StatusSelect
-                    value={item.status}
-                    disabled={!item.id || statusBusy === item.id}
-                    onChange={(status) => setItemStatus(item.id, status)}
-                  />
                 </div>
               </div>
               {item.play_url ? (
@@ -1768,6 +1766,10 @@ function ResultsPage({ currentJob }) {
               )}
               <div className="asset-body">
                 <h3>{item.display_hook || item.hook || "Untitled asset"}</h3>
+                <QualityChips item={item} />
+                {item.transcript_excerpt ? (
+                  <blockquote className="review-excerpt">{item.transcript_excerpt}</blockquote>
+                ) : null}
                 <p className="asset-caption">{item.display_caption || item.summary || "Campaign copy is ready for review."}</p>
                 {item.post_markdown ? <pre className="post-markdown compact">{item.post_markdown}</pre> : null}
                 <p className="asset-copy-hint">
@@ -1815,16 +1817,6 @@ function ResultsPage({ currentJob }) {
                 <pre className="post-markdown">{decks[currentDeck]}</pre>
               </section>
           )}
-          <CalendarMonth
-            calendar={board.calendar}
-            holds={holds}
-            onHold={(platform, year, month) => applyHold(platform, false, year, month)}
-            onResume={(platform, year, month) => applyHold(platform, true, year, month)}
-            onPause={pauseItem}
-            onResumeItem={resumeItem}
-            onSkip={skipItem}
-            onStatus={setItemStatus}
-          />
         </>
       )}
     </AppShell>
@@ -1860,9 +1852,8 @@ function CalendarStudio() {
   return (
     <AppShell flow={false}>
       <PageHeading
-        eyebrow="Posting"
-        title="This month, on your terms"
-        description="Clips are already made. Pause a whole platform or any single date — nothing is deleted, and you can resume anytime."
+        title="This month"
+        description="Pause a platform or any date. Resume anytime — nothing is deleted."
         aside={busy ? <LoaderCircle className="spin" size={18} /> : null}
       />
       {error && <Notice>{error}</Notice>}
@@ -1887,7 +1878,7 @@ function CalendarStudio() {
   );
 }
 
-function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign }) {
+function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign, campaign }) {
   const auth = useAuth();
   const navigate = useNavigate();
   const connected = (accounts || []).filter((item) => item.connected);
@@ -1899,6 +1890,13 @@ function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign }) 
 
   useEffect(() => {
     creatorApi.getBrand().then((brand) => setBrandForm(formFromBrand(brand))).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (window.location.hash === "#billing") {
+      const el = document.getElementById("billing");
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }, []);
 
   const syncCampaign = (form) => {
@@ -1969,11 +1967,11 @@ function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign }) 
   return (
     <AppShell flow={false}>
       <PageHeading
-        eyebrow="Settings"
-        title="Your workspace"
-        description="Branding, accounts, schedule control, and sign out — the whole campaign stays here."
+        title="Settings"
+        description="Account, branding, and connected channels."
       />
-      <section className="panel campaign-panel">
+      <BillingPanel durationDays={campaign?.durationDays || 30} />
+      <section className="panel campaign-panel" style={{ marginTop: 18 }}>
         <div className="section-heading">
           <div>
             <span className="overline">Signed in</span>
@@ -2132,11 +2130,26 @@ function NextStepGuide({ name, onStay, onSkip }) {
 function AuthScreen() {
   const auth = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState("signin");
+  const location = useLocation();
+  const initialMode = (() => {
+    const params = new URLSearchParams(location.search);
+    const mode = (params.get("mode") || "").toLowerCase();
+    if (mode === "signup" || mode === "register" || params.get("signup") === "1") return "signup";
+    if (mode === "reset") return "reset";
+    return "signin";
+  })();
+  const [mode, setMode] = useState(initialMode);
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [googleReady, setGoogleReady] = useState(Boolean(auth.cloud));
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const next = (params.get("mode") || "").toLowerCase();
+    if (next === "signup" || next === "register" || params.get("signup") === "1") setMode("signup");
+    else if (next === "reset") setMode("reset");
+  }, [location.search]);
 
   useEffect(() => {
     if (auth.cloud) {
@@ -2200,16 +2213,14 @@ function AuthScreen() {
         </div>
         <Logo />
         <div className="auth-copy">
-          <div className="eyebrow">CREATE · REPURPOSE · SCHEDULE</div>
           <h1>One video.<br />A month of content.</h1>
           <p>
-            Upload one podcast, interview, or long-form video. creatorOS turns it
-            into platform-ready Shorts, Reels, LinkedIn posts, and a complete 30-day calendar.
+            Turn a podcast or long-form talk into Shorts, Reels, LinkedIn, and X — with a calendar you control.
           </p>
           <div className="auth-benefits">
-            <span><CheckCircle2 /> Turn one video into weeks of content</span>
-            <span><CheckCircle2 /> Generate once, post across every platform</span>
-            <span><CheckCircle2 /> Control your entire content calendar</span>
+            <span><CheckCircle2 /> Multi-platform clips from one source</span>
+            <span><CheckCircle2 /> Calendar you can pause anytime</span>
+            <span><CheckCircle2 /> Nothing publishes until you approve</span>
           </div>
         </div>
         <AuthProductPreview />
@@ -2298,32 +2309,47 @@ function CreatorApp() {
         savedBrand = {};
       }
       const { has_logo: _hasLogo, logo_url: _logoUrl, ...brandRest } = savedBrand;
+      const endScreenOn = Boolean(campaign.endScreenEnabled);
+      const brandPayload = {
+        ...brandRest,
+        brand_name: campaign.brandName,
+        website: campaign.website,
+        tagline: campaign.tagline || savedBrand.tagline || "",
+        goal: campaign.goal,
+        audience: campaign.audience,
+        tone: campaign.tone,
+        show_type: campaign.showType || "auto",
+        campaign_duration_days: campaign.durationDays,
+        campaign_start_date: campaign.startDate,
+        logo_path: savedBrand.logo_path || "",
+        end_screen_enabled: endScreenOn,
+        end_screen_duration: Number(campaign.endScreenDuration || savedBrand.end_screen_duration || 3),
+        end_screen_template: campaign.endScreenTemplate || savedBrand.end_screen_template || "logo_name_website",
+        end_screen_cta: campaign.endScreenCta || savedBrand.end_screen_cta || "",
+        on_screen_captions_enabled: campaign.onScreenCaptionsEnabled !== false,
+      };
+      // Save before queueing so the worker always reads the toggle the user sees.
+      try {
+        await creatorApi.saveBrand(brandPayload);
+      } catch {
+        /* brand_context on the job is the source of truth below */
+      }
       const result = await creatorApi.startCampaign({
         source: campaign.source,
+        source_start: campaign.sourceType === "url" ? (campaign.sourceStart || undefined) : undefined,
+        source_end: campaign.sourceType === "url" ? (campaign.sourceEnd || undefined) : undefined,
         campaign_start_date: campaign.startDate,
         content_plan: contentPlan,
-        brand_context: {
-          ...brandRest,
-          brand_name: campaign.brandName,
-          website: campaign.website,
-          tagline: campaign.tagline || savedBrand.tagline || "",
-          goal: campaign.goal,
-          audience: campaign.audience,
-          tone: campaign.tone,
-          show_type: campaign.showType || "auto",
-          campaign_duration_days: campaign.durationDays,
-          campaign_start_date: campaign.startDate,
-          logo_path: savedBrand.logo_path || "",
-          end_screen_enabled: Boolean(campaign.endScreenEnabled),
-          end_screen_duration: Number(campaign.endScreenDuration || savedBrand.end_screen_duration || 3),
-          end_screen_template: campaign.endScreenTemplate || savedBrand.end_screen_template || "logo_name_website",
-          end_screen_cta: campaign.endScreenCta || savedBrand.end_screen_cta || "",
-          on_screen_captions_enabled: campaign.onScreenCaptionsEnabled !== false,
-        },
+        brand_context: brandPayload,
       });
       setCurrentJob(result.job_id);
       navigate(`/processing/${result.job_id}`);
     } catch (error) {
+      if (error?.status === 402 || /subscribe|subscription|free demo|pay to/i.test(error?.message || "")) {
+        window.alert(error.message || "You've used your free demo. Pay in Settings to continue.");
+        navigate("/workspace");
+        return;
+      }
       window.alert(error.message);
     } finally {
       setGenerating(false);
@@ -2348,9 +2374,11 @@ function CreatorApp() {
       <Route path="/strategy" element={<StrategyPage campaign={campaign} plan={plan} setPlan={setPlan} onGenerate={generate} generating={generating} />} />
       <Route path="/processing/:jobId?" element={<ProcessingPage currentJob={currentJob} onComplete={setCurrentJob} plan={plan} setPlan={setPlan} />} />
       <Route path="/complete/:jobId" element={<CompletionPage currentJob={currentJob} />} />
+      <Route path="/review" element={<ReviewPage AppShell={AppShell} PageHeading={PageHeading} Notice={Notice} />} />
+      <Route path="/transcript" element={<TranscriptPage AppShell={AppShell} PageHeading={PageHeading} Notice={Notice} CopyButton={CopyButton} Field={Field} />} />
       <Route path="/results/:jobId" element={<ResultsPage currentJob={currentJob} />} />
       <Route path="/calendar" element={<CalendarStudio />} />
-      <Route path="/workspace" element={<WorkspacePage accounts={accounts} refreshAccounts={refreshAccounts} accountBusy={accountBusy} setCampaign={setCampaign} />} />
+      <Route path="/workspace" element={<WorkspacePage accounts={accounts} refreshAccounts={refreshAccounts} accountBusy={accountBusy} setCampaign={setCampaign} campaign={campaign} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

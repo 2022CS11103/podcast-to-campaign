@@ -80,6 +80,8 @@ FRONTEND_URL=http://127.0.0.1:8000/app
 
 You can rotate keys with `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, and so on.
 
+For optional Stripe paywall env vars, see **Stripe subscriptions** below.
+
 Optional - YouTube publish:
 
 ```
@@ -147,6 +149,45 @@ python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
 Then open **http://127.0.0.1:8000/app/** again.
+
+### Stripe subscriptions (optional paywall)
+
+CreatorOS gates generation by **campaign length** — the same 14 / 30 / 45 / 60-day options as the campaign picker.
+
+1. Create four recurring Prices in the [Stripe Dashboard](https://dashboard.stripe.com/) (or one yearly that unlocks all).
+2. Add to the project `.env`:
+
+```env
+BILLING_ENABLED=true
+BILLING_ENFORCE=true
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_CAMPAIGN_14=price_...
+STRIPE_PRICE_CAMPAIGN_30=price_...
+STRIPE_PRICE_CAMPAIGN_45=price_...
+STRIPE_PRICE_CAMPAIGN_60=price_...
+STRIPE_PRICE_CAMPAIGN_14_LABEL=$19/mo
+STRIPE_PRICE_CAMPAIGN_30_LABEL=$29/mo
+STRIPE_PRICE_CAMPAIGN_45_LABEL=$39/mo
+STRIPE_PRICE_CAMPAIGN_60_LABEL=$49/mo
+# Optional annual unlock (covers all durations):
+STRIPE_PRICE_PRO_YEARLY=price_...
+STRIPE_PRICE_PRO_YEARLY_LABEL=$290/yr
+# Legacy alias: STRIPE_PRICE_PRO_MONTHLY maps to the 30-day pack
+FRONTEND_URL=http://127.0.0.1:8000
+BILLING_BYPASS_EMAILS=you@example.com
+```
+
+3. Install the SDK: `pip install stripe`
+4. Point a Stripe webhook to `POST /webhooks/stripe` for:
+   - `checkout.session.completed`
+   - `customer.subscription.updated`
+   - `customer.subscription.deleted`
+   - `invoice.paid`
+   - `invoice.payment_failed`
+5. Restart Uvicorn. Users pick a pack on **Billing**; Strategy highlights the pack that matches their campaign duration. Generating a longer calendar than the pack allows returns **402**.
+
+Leave `BILLING_ENFORCE` unset while testing (recommended). Generation stays open; packs can still show as a preview if `BILLING_ENABLED=true`. Checkout and the Strategy paywall only run when **both** `BILLING_ENABLED` and `BILLING_ENFORCE` are on with a real `sk_test_…` / `sk_live_…` key.
 
 ### If you change the code
 

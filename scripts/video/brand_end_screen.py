@@ -134,10 +134,10 @@ def choose_duration(clip_seconds: float, requested: int) -> float | None:
     if clip_seconds < 4:
         return None
     cap = max(2, int(clip_seconds * 0.3))
-    # Whole file must stay inside the Shorts limit once the end card is appended.
     room = max(0, int(SHORTS_PLATFORM_MAX_SECONDS - clip_seconds))
+    # Prefer a short brand card over dropping it when the clip already fills ~60s.
     if room < 2:
-        return None
+        return 2.0
     return float(min(requested, cap, room))
 
 

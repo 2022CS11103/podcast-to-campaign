@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { creatorApi, setAccessTokenProvider } from "./api";
+import { creatorApi, setAccessTokenProvider, setUserEmailProvider } from "./api";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -78,6 +78,8 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     setAccessTokenProvider(async () => session?.access_token || null);
+    const local = cloudAuth ? session?.user : localUser(session);
+    setUserEmailProvider(async () => local?.email || null);
   }, [session]);
 
   const value = useMemo(

@@ -11,7 +11,7 @@ from agents.orchestrator import CreatorOS
 from api.job_manager import job_manager
 from utils.cost_tracker import generate_report, reset_log
 from utils.content_plan import plan_is_usable, normalize_plan
-from utils.brand_settings import merge_and_save
+from utils.brand_settings import merge_and_save, load_brand
 from utils.pipeline_timer import reset as reset_timer, log_step, finish, snapshot, format_duration
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -34,13 +34,26 @@ def _public_error(exc: Exception) -> str:
     text = str(exc)
     lowered = text.lower()
     bot = "not a bot" in lowered or "sign in to confirm" in lowered or "bot check" in lowered
-    locked = "could not copy chrome cookie database" in lowered
+    locked = any(
+        hint in lowered
+        for hint in (
+            "could not copy chrome cookie database",
+            "could not find firefox cookies",
+            "failed to decrypt",
+            "keychain",
+        )
+    )
     forbidden = "http error 403" in lowered or "po token" in lowered or "403 forbidden" in lowered
     errno22 = "errno 22" in lowered or "invalid argument" in lowered
     if bot or locked or forbidden:
         marker = "YouTube blocked this download"
         if marker in text:
             return text[text.rfind(marker):].strip()[:1200]
+        if forbidden:
+            return (
+                "YouTube blocked the download (HTTP 403 / missing PO token). "
+                "Log into youtube.com in Firefox and Try Again, or upload the MP4."
+            )
         return (
             "YouTube blocked the download. "
             "Try Again — paste-a-link does not require a signed-in browser. "
@@ -105,10 +118,15 @@ def _run_script(script: str):
 
 def _route_and_brand():
     _run_script("scripts/ai/platform_router.py")
+    brand = load_brand()
+    if not brand.get("end_screen_enabled"):
+        print("⚠️  Brand end screen is OFF in brand_context.json — clips will have no outro.")
+        print("   Turn on “Add end screen” in Campaign branding and generate again.")
+        return
     try:
         _run_script("scripts/video/brand_end_screen.py")
     except Exception as exc:
-        print(f"⚠️  Brand end screen skipped: {exc}")
+        print(f"⚠️  Brand end screen failed: {exc}")
         print("   Original generated clips were left unchanged.")
 
 
@@ -306,7 +324,7 @@ def _wind_down(job_id, stopped: JobStopped, content_plan, done_stages):
 
 def _worker():
     while True:
-        job_id, source, content_plan, brand_context = task_queue.get()
+        job_id, source, content_plan, brand_context, source_start, source_end = task_queue.get()
         done_stages = set()
         try:
             reset_log()
@@ -327,7 +345,7 @@ def _worker():
 
             job_manager.update(job_id, status="running", step="video")
             stages = [
-                ("video", lambda: creator.video.run(source)),
+                ("video", lambda: creator.video.run(source, source_start=source_start, source_end=source_end)),
                 ("transcript", creator.transcript.run),
                 ("highlight", creator.highlight.run),
                 ("strategy", lambda: _run_script("scripts/ai/strategy_agent.py")),
@@ -391,5 +409,12 @@ def start_worker():
     t.start()
 
 
-def enqueue_job(job_id: str, source: str, content_plan: dict = None, brand_context: dict = None):
-    task_queue.put((job_id, source, content_plan, brand_context))
+def enqueue_job(
+    job_id: str,
+    source: str,
+    content_plan: dict = None,
+    brand_context: dict = None,
+    source_start=None,
+    source_end=None,
+):
+    task_queue.put((job_id, source, content_plan, brand_context, source_start, source_end))

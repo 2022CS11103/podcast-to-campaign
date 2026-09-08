@@ -49,7 +49,7 @@ export const PROCESSING_STEPS = [
   {
     id: "packaging",
     label: "Packaging the campaign",
-    description: "Final videos and copy, ready to review before anything goes live.",
+    description: "Drafts ready for human approval — nothing posts until you review.",
   },
 ];
 
@@ -71,8 +71,10 @@ export const SHOW_TYPES = [
 ];
 
 export const DEFAULT_CAMPAIGN = {
-  sourceType: "url",
+  sourceType: "upload",
   source: "",
+  sourceStart: "",
+  sourceEnd: "",
   brandName: "CreatorOS",
   website: "",
   tagline: "",
@@ -82,7 +84,7 @@ export const DEFAULT_CAMPAIGN = {
   endScreenCta: "",
   onScreenCaptionsEnabled: true,
   goal: "Brand awareness",
-  audience: "Startup founders",
+  audience: "Agency client audiences",
   tone: "Professional",
   showType: "auto",
   durationDays: 30,

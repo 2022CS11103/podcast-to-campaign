@@ -72,6 +72,7 @@ export function EndScreenPreview({
   template,
   logoSrc,
   duration = 3,
+  enabled = true,
 }) {
   const name = (brandName || "").trim() || "Your brand";
   const site = displayWebsite(website);
@@ -86,6 +87,17 @@ export function EndScreenPreview({
   } else {
     secondary = line;
     tertiary = site;
+  }
+
+  if (!enabled) {
+    return (
+      <div className="end-screen-preview-wrap">
+        <div className="end-screen-preview is-disabled" aria-label="End screen off">
+          <strong>End screen off</strong>
+          <span className="end-screen-tag">Turn it on above to append this card after every Short / Reel.</span>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -241,6 +253,7 @@ export function BrandingFields({
         template={value.endScreenTemplate}
         logoSrc={logoSrc}
         duration={value.endScreenDuration}
+        enabled={Boolean(value.endScreenEnabled)}
       />
     </div>
   );

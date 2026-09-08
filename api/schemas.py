@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, model_validator
-from typing import Optional, Dict, Any, Literal
+from typing import Optional, Dict, Any, Literal, List
 
 
 def _pick(data: dict, *keys):
@@ -18,6 +18,8 @@ class ProcessRequest(BaseModel):
     content_plan: Optional[Dict[str, Any]] = None
     brand_context: Optional[Dict[str, Any]] = None
     campaign_start_date: Optional[str] = None
+    source_start: Optional[str] = None
+    source_end: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -29,6 +31,14 @@ class ProcessRequest(BaseModel):
             source = _pick(data, "url", "youtube_url", "video_url", "podcast_url", "file_path")
             if source:
                 data["source"] = source
+        if not data.get("source_start"):
+            start = _pick(data, "start", "start_time", "clip_start", "from_time")
+            if start is not None:
+                data["source_start"] = str(start)
+        if not data.get("source_end"):
+            end = _pick(data, "end", "end_time", "clip_end", "to_time")
+            if end is not None:
+                data["source_end"] = str(end)
         brand = dict(data.get("brand_context") or {})
         for src, dest in (
             ("brand_name", "brand_name"),
@@ -126,6 +136,14 @@ class ScheduleStatusRequest(BaseModel):
     month: Optional[int] = None
 
 
+class ReviewBulkRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    action: Literal["approve", "reject"] = "approve"
+    item_ids: Optional[List[str]] = None
+    year: Optional[int] = None
+    month: Optional[int] = None
+
+
 class YouTubeUploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     item_id: Optional[str] = None
@@ -175,3 +193,24 @@ class BrandUpdateRequest(BaseModel):
     show_type: Optional[str] = None
     campaign_duration_days: Optional[int] = None
     campaign_start_date: Optional[str] = None
+
+
+class BillingCheckoutRequest(BaseModel):
+    email: Optional[str] = None
+    price_id: Optional[str] = None
+    user_id: Optional[str] = None
+    campaign_days: Optional[int] = None
+
+
+class BillingPortalRequest(BaseModel):
+    email: Optional[str] = None
+
+
+class ClipDeskRequest(BaseModel):
+    """Standalone transcript-desk: URL + optional timespan."""
+    model_config = ConfigDict(extra="allow")
+    url: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+    mode: Literal["range", "full"] = "range"
+    job_id: Optional[str] = None

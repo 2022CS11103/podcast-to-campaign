@@ -2,9 +2,14 @@ const configuredBase = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 export const API_BASE = configuredBase || (import.meta.env.DEV ? "/api" : "");
 
 let accessTokenProvider = async () => null;
+let userEmailProvider = async () => null;
 
 export function setAccessTokenProvider(provider) {
   accessTokenProvider = provider;
+}
+
+export function setUserEmailProvider(provider) {
+  userEmailProvider = provider;
 }
 
 export function apiUrl(path) {
@@ -14,6 +19,7 @@ export function apiUrl(path) {
 
 export async function apiFetch(path, options = {}) {
   const token = await accessTokenProvider();
+  const email = await userEmailProvider();
   const headers = new Headers(options.headers || {});
   if (
     options.body &&
@@ -23,6 +29,7 @@ export async function apiFetch(path, options = {}) {
     headers.set("Content-Type", "application/json");
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (email) headers.set("X-User-Email", email);
 
   const response = await fetch(apiUrl(path), { ...options, headers });
   const type = response.headers.get("content-type") || "";
@@ -31,11 +38,18 @@ export async function apiFetch(path, options = {}) {
     : await response.text();
 
   if (!response.ok) {
+    const detail = typeof data === "object" ? data.detail : null;
     const message =
-      (typeof data === "object" && (data.detail || data.error)) ||
+      (typeof detail === "object" && detail?.message) ||
+      (typeof detail === "string" && detail) ||
+      (typeof data === "object" && data.error) ||
       (typeof data === "string" && data) ||
       `Request failed (${response.status})`;
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.detail = detail;
+    error.payload = data;
+    throw error;
   }
   return data;
 }
@@ -105,5 +119,33 @@ export const creatorApi = {
     apiFetch(`/schedule/resume-item/${itemId}`, { method: "POST", body: JSON.stringify({ year, month }) }),
   setPostStatus: (itemId, status, year, month) =>
     apiFetch(`/schedule/status/${itemId}`, { method: "POST", body: JSON.stringify({ status, year, month }) }),
+  reviewBulk: (payload = {}) =>
+    apiFetch("/review/bulk", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   authConfig: () => apiFetch("/auth/config"),
+  transcript: (source) =>
+    apiFetch(source ? `/transcript?source=${encodeURIComponent(source)}` : "/transcript"),
+  fetchClip: (payload = {}) =>
+    apiFetch("/tools/fetch-clip", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  transcribeClip: (payload = {}) =>
+    apiFetch("/tools/transcribe-clip", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  billingStatus: () => apiFetch("/billing/status"),
+  createCheckout: (payload = {}) =>
+    apiFetch("/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  createPortal: (payload = {}) =>
+    apiFetch("/billing/portal", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };

@@ -4,6 +4,9 @@ cookies.txt
 youtube_cookies.txt
 data/
 
+# Billing state (local entitlement store)
+memory/subscriptions.json
+
 # Generated outputs
 output/
 input/

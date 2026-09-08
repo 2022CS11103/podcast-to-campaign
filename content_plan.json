@@ -1,7 +1,7 @@
 {
   "instagram_reels": {
     "count": 5,
-    "interval_days": 3,
+    "interval_days": 5,
     "purpose": "Build reach"
   },
   "youtube_shorts": {
@@ -10,12 +10,12 @@
     "purpose": "Grow subscribers"
   },
   "linkedin": {
-    "count": 8,
+    "count": 5,
     "interval_days": 3,
     "purpose": "Build authority"
   },
   "twitter": {
-    "count": 12,
+    "count": 7,
     "interval_days": 2,
     "purpose": "Start conversations"
   }

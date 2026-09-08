@@ -217,6 +217,66 @@ def editor_note(clip, platform, reused):
     )
 
 
+def review_reasons(clip: dict) -> list:
+    """Short human-readable why-this-clip tags for the HITL review board."""
+    tags = []
+    scores = clip.get("scores") or {}
+    if isinstance(scores, dict):
+        ranked = sorted(
+            ((k, float(v or 0)) for k, v in scores.items() if isinstance(v, (int, float))),
+            key=lambda pair: pair[1],
+            reverse=True,
+        )
+        dim_map = {
+            "hook": "hook in first seconds",
+            "education": "standalone teaching moment",
+            "emotion": "emotional peak",
+            "curiosity": "curiosity gap",
+            "shareability": "highly shareable line",
+        }
+        for key, value in ranked[:2]:
+            if value >= 6 and key in dim_map:
+                tags.append(dim_map[key])
+
+    highlight = (clip.get("highlight_reason") or "").strip()
+    if highlight and highlight.lower() not in {t.lower() for t in tags}:
+        tags.append(highlight[:80])
+
+    text = (clip.get("text") or "").strip()
+    if "?" in text[:280] and "conversation / Q&A beat" not in tags:
+        tags.append("conversation / Q&A beat")
+
+    overall = float(clip.get("overall_score") or 0)
+    if overall >= 75:
+        tags.append("top-scored moment")
+    elif overall >= 60:
+        tags.append("strong overall score")
+
+    angle = get_content_angle(clip)
+    if angle and angle.lower() not in " ".join(tags).lower():
+        tags.append(angle)
+
+    deduped = []
+    seen = set()
+    for tag in tags:
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(tag)
+        if len(deduped) >= 5:
+            break
+    return deduped or ["AI-selected highlight"]
+
+
+def transcript_excerpt(clip: dict, limit: int = 280) -> str:
+    text = (clip.get("text") or clip.get("summary") or "").strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0]
+    return f"{cut}…"
+
+
 def empty_performance():
     return {
         "impressions": 0,
@@ -303,7 +363,7 @@ def main():
                 "assigned_platform": platform,
                 "posting_interval_days": interval_days,
                 "scheduled_date": scheduled_date.strftime("%Y-%m-%d"),
-                "status": "pending",
+                "status": "ai_generated",
                 "active_variant": "A",
                 "variants": [],
                 "performance": empty_performance(),
@@ -315,6 +375,9 @@ def main():
                 "visual_score": clip.get("visual_score"),
                 "audio_energy": clip.get("audio_energy"),
                 "highlight_reason": clip.get("highlight_reason"),
+                "review_reasons": review_reasons(clip),
+                "transcript_excerpt": transcript_excerpt(clip),
+                "detected_topic": get_content_angle(clip),
             })
 
             if is_video and clip.get("chunk_id") not in used_ids:
