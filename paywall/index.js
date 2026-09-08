@@ -18,13 +18,18 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 loadEnv(path.join(__dirname, ".env"));
 loadEnv(path.join(__dirname, "..", ".env"));
 
-/** Where the FastAPI studio lives (landing CTAs redirect here). */
+/** Where the FastAPI studio lives (landing CTAs open signup here). */
 function resolveStudioUrl() {
   const fromEnv = String(process.env.STUDIO_URL || "").trim();
-  if (fromEnv) return fromEnv.replace(/\/?$/, "/");
+  if (fromEnv) {
+    // Prefer signup entry for marketing CTAs unless already query-shaped.
+    if (/[?&]mode=/.test(fromEnv) || /signup=/.test(fromEnv)) return fromEnv;
+    const base = fromEnv.replace(/\/?$/, "/");
+    return `${base}?mode=signup`;
+  }
   const publicUrl = String(process.env.PUBLIC_URL || "").trim().replace(/\/$/, "");
-  if (publicUrl) return `${publicUrl}/app/`;
-  return "http://127.0.0.1:8002/app/";
+  if (publicUrl) return `${publicUrl}/app/?mode=signup`;
+  return "http://127.0.0.1:8002/app/?mode=signup";
 }
 const STUDIO_URL = resolveStudioUrl();
 

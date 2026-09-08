@@ -2130,11 +2130,26 @@ function NextStepGuide({ name, onStay, onSkip }) {
 function AuthScreen() {
   const auth = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState("signin");
+  const location = useLocation();
+  const initialMode = (() => {
+    const params = new URLSearchParams(location.search);
+    const mode = (params.get("mode") || "").toLowerCase();
+    if (mode === "signup" || mode === "register" || params.get("signup") === "1") return "signup";
+    if (mode === "reset") return "reset";
+    return "signin";
+  })();
+  const [mode, setMode] = useState(initialMode);
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [googleReady, setGoogleReady] = useState(Boolean(auth.cloud));
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const next = (params.get("mode") || "").toLowerCase();
+    if (next === "signup" || next === "register" || params.get("signup") === "1") setMode("signup");
+    else if (next === "reset") setMode("reset");
+  }, [location.search]);
 
   useEffect(() => {
     if (auth.cloud) {

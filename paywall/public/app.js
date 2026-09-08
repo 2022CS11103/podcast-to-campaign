@@ -6,8 +6,8 @@
     typeof location !== "undefined"
     && (location.hostname === "127.0.0.1" || location.hostname === "localhost");
   const DEFAULT_STUDIO = isLocal
-    ? "http://127.0.0.1:8002/app/"
-    : `${location.origin}/app/`;
+    ? "http://127.0.0.1:8002/app/?mode=signup"
+    : `${location.origin}/app/?mode=signup`;
 
   async function wireStudioLinks() {
     let studioUrl =
@@ -17,14 +17,18 @@
       const res = await fetch("/api/config", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
-        if (data?.studioUrl) studioUrl = String(data.studioUrl).replace(/\/?$/, "/");
+        if (data?.studioUrl) studioUrl = String(data.studioUrl);
       }
     } catch {
       /* fall back */
     }
-    studioUrl = String(studioUrl).replace(/\/?$/, "/");
+    studioUrl = String(studioUrl || DEFAULT_STUDIO);
+    if (!/[?&]mode=/.test(studioUrl) && !/[?&]signup=/.test(studioUrl)) {
+      studioUrl = studioUrl.replace(/\/?$/, "/");
+      studioUrl += (studioUrl.includes("?") ? "&" : "?") + "mode=signup";
+    }
 
-    document.querySelectorAll("[data-studio-link], a.studio-link, a[href='/open-studio'], a[href='/app'], a[href='/try'], a[href='/demo'], a[href='/trial'], a[href='/free-demo']").forEach((link) => {
+    document.querySelectorAll("[data-studio-link], a.studio-link, a[href='/open-studio'], a[href='/app'], a[href='/try'], a[href='/demo'], a[href='/trial'], a[href='/free-demo'], a[href='/signup'], a[href='/login']").forEach((link) => {
       link.setAttribute("href", studioUrl);
     });
   }
