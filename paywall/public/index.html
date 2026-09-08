@@ -3,276 +3,397 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#141210" />
+    <meta name="theme-color" content="#0a0a0c" />
     <title>creatorOS — One video. A month of content.</title>
     <meta
       name="description"
-      content="Upload one podcast or long-form video. creatorOS plans, edits, and schedules Shorts, Reels, LinkedIn, and X — with a calendar you control."
+      content="creatorOS turns one long-form conversation into a month of content you control."
     />
-    <link rel="icon" type="image/png" href="/logo.png" />
-    <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="icon" type="image/png" href="/logo.png?v=2" />
+    <link rel="shortcut icon" type="image/png" href="/logo.png?v=2" />
+    <link rel="apple-touch-icon" href="/logo.png?v=2" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Space+Grotesk:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/styles.css?v=6" />
+    <link rel="stylesheet" href="/styles.css?v=28" />
   </head>
   <body>
-    <header class="nav">
-      <a class="brand" href="#top">
-        <img src="/logo.png" alt="" width="36" height="36" />
-        <span>creatorOS</span>
-      </a>
-      <nav class="nav-links" id="nav-links">
-        <a href="#product">Product</a>
-        <a href="#how">How it works</a>
-        <a href="#pricing">Pricing</a>
-      </nav>
-      <div class="nav-actions">
-        <a class="ghost-btn" href="#pricing">Sign in</a>
-        <a class="primary-btn" href="#pricing">Get started</a>
+    <main class="landing-page" id="top">
+      <nav class="site-nav">
+        <a class="brand-link" href="#top" aria-label="creatorOS home">
+          <span class="brand-mark" data-testid="nav-brand-mark">
+            <img class="brand-logo" src="/logo.png?v=2" alt="creatorOS" width="32" height="32" />
+            <span class="brand-wordmark" data-testid="nav-brand-wordmark">creator<b>OS</b></span>
+          </span>
+        </a>
+
+        <div class="nav-links" id="nav-links">
+          <a href="#product">Product</a>
+          <a href="#how-it-works">How it works</a>
+          <a href="#access">Access</a>
+          <a class="nav-studio studio-link" href="/open-studio" data-studio-link>Open studio <span aria-hidden="true">↗</span></a>
+        </div>
+
         <button class="menu-btn" type="button" aria-label="Open menu" data-menu>
-          <span></span><span></span>
+          <span></span><span></span><span></span>
         </button>
-      </div>
-    </header>
+      </nav>
 
-    <main id="top">
-      <section class="hero">
-        <div class="hero-media" aria-hidden="true">
-          <div class="hero-wash"></div>
-          <div class="hero-grain"></div>
-        </div>
-
+      <section class="hero-section">
         <div class="hero-copy">
-          <p class="brand-mark">creatorOS</p>
-          <h1>One video.<br />A month of content.</h1>
-          <p class="lede">
-            Turn a podcast or long-form talk into Shorts, Reels, LinkedIn, and X — with a calendar
-            you can pause anytime. Nothing publishes until you approve it.
+          <div class="hero-kicker" data-testid="hero-kicker">
+            <span class="live-dot"></span> THE CREATOR OPERATING SYSTEM
+          </div>
+          <h1 data-testid="hero-headline">
+            One video.<br /><em>A month of content.</em>
+          </h1>
+          <p class="hero-description" data-testid="hero-description">
+            Turn one long-form conversation into Shorts, Reels, LinkedIn posts, and X posts — all on a calendar you control.
           </p>
-          <div class="hero-cta">
-            <a class="primary-btn lg" href="#pricing">Start 7-day trial</a>
-            <a class="secondary-btn lg" href="#how">See how it works</a>
+          <div class="hero-cta-row" data-testid="hero-cta-group">
+            <a class="button button-primary studio-link" href="/open-studio" data-studio-link data-testid="hero-try-demo-button">
+              Try free demo
+              <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+            </a>
+            <a class="button button-quiet" href="#how-it-works" data-testid="hero-see-how-it-works-link">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 9.003a1 1 0 0 1 1.517-.859l4.997 2.997a1 1 0 0 1 0 1.718l-4.997 2.997A1 1 0 0 1 9 14.996z"/><circle cx="12" cy="12" r="10"/></svg>
+              See how it works
+            </a>
+          </div>
+          <p class="hero-note" data-testid="hero-access-note">One free demo per email. After that, pay to continue.</p>
+        </div>
+
+        <div class="hero-plane" data-testid="hero-product-plane" aria-label="creatorOS content calendar product preview">
+          <div class="plane-topline">
+            <span>CAMPAIGN / 042</span>
+            <span><span class="live-dot"></span> LIVE REVIEW</span>
+          </div>
+
+          <div class="hero-media-composition">
+            <div class="vertical-frame frame-back" data-testid="hero-reel-frame-back">
+              <div
+                class="frame-image"
+                style="background-image:url('https://images.unsplash.com/photo-1646105659698-1389145bf6a0?auto=format&amp;fit=crop&amp;w=800&amp;q=85')"
+              ></div>
+              <span class="frame-caption">CLIP 04 / 00:32</span>
+            </div>
+
+            <div class="vertical-frame frame-main" data-testid="hero-reel-frame-main">
+              <div
+                class="frame-image"
+                style="background-image:url('https://images.unsplash.com/photo-1646198022729-abdd8ad64cff?auto=format&amp;fit=crop&amp;w=800&amp;q=85')"
+              ></div>
+              <div class="frame-overlay-copy">
+                <span>THE HOOK</span>
+                <strong>“The best ideas<br />need a place to land.”</strong>
+              </div>
+              <span class="frame-caption">SHORT / APPROVED</span>
+              <div class="frame-play">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg>
+              </div>
+            </div>
+
+            <div class="calendar-preview" data-testid="hero-calendar-preview">
+              <div class="calendar-preview-head">
+                <span>JUN 2025</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
+              </div>
+              <div class="calendar-grid">
+                <span class="calendar-day">1</span><span class="calendar-day">2</span><span class="calendar-day calendar-day-active">3</span><span class="calendar-day">4</span><span class="calendar-day">5</span><span class="calendar-day calendar-day-active">6</span><span class="calendar-day">7</span>
+                <span class="calendar-day">8</span><span class="calendar-day calendar-day-active">9</span><span class="calendar-day">10</span><span class="calendar-day">11</span><span class="calendar-day">12</span><span class="calendar-day calendar-day-active">13</span><span class="calendar-day">14</span>
+                <span class="calendar-day">15</span><span class="calendar-day calendar-day-active">16</span><span class="calendar-day">17</span><span class="calendar-day">18</span><span class="calendar-day">19</span><span class="calendar-day calendar-day-active">20</span><span class="calendar-day">21</span>
+              </div>
+              <div class="calendar-summary">
+                <span class="summary-line"></span>
+                <span>24 pieces ready</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="timeline-row" data-testid="hero-timeline">
+            <span class="timeline-time">00:24</span>
+            <span class="timeline-track"><span class="timeline-progress"></span></span>
+            <span class="timeline-time">42:18</span>
+          </div>
+
+          <div class="plane-footer">
+            <span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>
+              ONE SOURCE / 27 OUTPUTS
+            </span>
+            <span>
+              APPROVAL REQUIRED
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m7 7 10 10"/><path d="M17 7v10H7"/></svg>
+            </span>
           </div>
         </div>
-
-        <div class="filmstrip" aria-hidden="true">
-          <figure class="frame frame-a">
-            <div class="frame-top"><span class="frame-label">Reel</span><span class="frame-dur">9:16</span></div>
-            <div class="frame-bars" aria-hidden="true"><i></i><i></i><i></i></div>
-            <strong>00:42</strong>
-            <em>Hook + punchline</em>
-          </figure>
-          <figure class="frame frame-b">
-            <div class="frame-top"><span class="frame-label">Short</span><span class="frame-dur">9:16</span></div>
-            <div class="frame-bars" aria-hidden="true"><i></i><i></i><i></i></div>
-            <strong>00:37</strong>
-            <em>Q&amp;A beat</em>
-          </figure>
-          <figure class="frame frame-c">
-            <div class="frame-top"><span class="frame-label">LinkedIn</span><span class="frame-dur">Copy</span></div>
-            <div class="frame-bars text" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-            <strong>Post</strong>
-            <em>Authority cut</em>
-          </figure>
-          <figure class="frame frame-d">
-            <div class="frame-top"><span class="frame-label">X</span><span class="frame-dur">Thread</span></div>
-            <div class="frame-bars text" aria-hidden="true"><i></i><i></i><i></i></div>
-            <strong>Thread</strong>
-            <em>Conversation start</em>
-          </figure>
-        </div>
       </section>
 
-      <section class="channels" aria-label="Supported channels">
-        <p>Cuts and copy, rewritten for every channel</p>
-        <ul>
-          <li>YouTube Shorts</li>
-          <li>Instagram Reels</li>
-          <li>LinkedIn</li>
-          <li>X</li>
-        </ul>
-      </section>
+      <section class="section product-section" id="product">
+        <div class="section-intro proof-intro">
+          <div class="section-eyebrow"><span class="eyebrow-rule" aria-hidden="true"></span>PRODUCT PROOF / OUTPUTS</div>
+          <h2>
+            One conversation.<br /><em>Every useful angle.</em>
+          </h2>
+          <p>No content graveyard. Every cut has a job, a format, and a place on the calendar.</p>
+        </div>
 
-      <section class="section" id="product">
-        <div class="section-head reveal">
-          <h2>What you get</h2>
-          <p>Clips, copy, and a calendar — ready for review.</p>
+        <div class="format-tabs" role="tablist" aria-label="Content output formats">
+          <button type="button" class="format-tab format-tab-active" role="tab" aria-selected="true" data-format="All cuts">All cuts</button>
+          <button type="button" class="format-tab" role="tab" aria-selected="false" data-format="Shorts">Shorts</button>
+          <button type="button" class="format-tab" role="tab" aria-selected="false" data-format="Reels">Reels</button>
+          <button type="button" class="format-tab" role="tab" aria-selected="false" data-format="LinkedIn">LinkedIn</button>
+          <button type="button" class="format-tab" role="tab" aria-selected="false" data-format="X posts">X posts</button>
         </div>
-        <div class="feature-rail">
-          <article class="reveal">
-            <p class="overline">1</p>
-            <h3>Source</h3>
-            <p>Paste a URL or drop an MP4.</p>
-          </article>
-          <article class="reveal">
-            <p class="overline">2</p>
-            <h3>Clips</h3>
-            <p>Vertical Shorts and Reels with captions.</p>
-          </article>
-          <article class="reveal">
-            <p class="overline">3</p>
-            <h3>Copy</h3>
-            <p>LinkedIn and X drafts written for each channel.</p>
-          </article>
-          <article class="reveal">
-            <p class="overline">4</p>
-            <h3>Calendar</h3>
-            <p>A month of posts you can pause or skip.</p>
-          </article>
-          <article class="reveal">
-            <p class="overline">5</p>
-            <h3>Review</h3>
-            <p>Approve before anything publishes.</p>
-          </article>
-        </div>
-      </section>
 
-      <section class="section" id="how">
-        <div class="section-head reveal">
-          <h2>How it works</h2>
-          <p>One source in. A reviewable calendar out.</p>
-        </div>
-        <ol class="steps">
-          <li class="reveal">
-            <span>01</span>
-            <div>
-              <h3>Source</h3>
-              <p>Upload a long-form video or paste a URL.</p>
+        <div class="filmstrip">
+          <article class="proof-card proof-card-tall" data-kind="Shorts">
+            <div
+              class="proof-card-image"
+              style="background-image:url('https://images.unsplash.com/photo-1646198022729-abdd8ad64cff?auto=format&amp;fit=crop&amp;w=800&amp;q=85')"
+            >
+              <span class="proof-badge">▶ SHORT</span>
+              <span class="proof-subtitle">The room changes<br /><strong>when you say it out loud.</strong></span>
             </div>
-          </li>
-          <li class="reveal">
-            <span>02</span>
-            <div>
-              <h3>Process</h3>
-              <p>Find clips, cut verticals, and write platform copy.</p>
+            <div class="proof-card-footer">
+              <span>01 / 09</span>
+              <strong>Hook cut / 00:32</strong>
+              <span class="approved-label">✓ Ready</span>
             </div>
-          </li>
-          <li class="reveal">
-            <span>03</span>
-            <div>
-              <h3>Review &amp; publish</h3>
-              <p>Approve what ships. Pause the rest. Nothing goes out alone.</p>
+          </article>
+
+          <article class="proof-card proof-card-tall proof-card-offset" data-kind="Reels">
+            <div
+              class="proof-card-image"
+              style="background-image:url('https://images.unsplash.com/photo-1646105659698-1389145bf6a0?auto=format&amp;fit=crop&amp;w=800&amp;q=85')"
+            >
+              <span class="proof-badge">◎ REEL</span>
+              <span class="proof-subtitle">Stop making<br /><strong>content in the dark.</strong></span>
             </div>
-          </li>
-        </ol>
+            <div class="proof-card-footer">
+              <span>02 / 09</span>
+              <strong>Story cut / 00:47</strong>
+              <span class="pending-label">Review</span>
+            </div>
+          </article>
+
+          <article class="proof-card proof-card-wide" data-kind="LinkedIn">
+            <div class="linkedin-card-head">
+              <span class="mini-avatar">AM</span>
+              <span>
+                <strong>Avery Morgan</strong>
+                <small>Founder, Futureproof</small>
+              </span>
+              <span class="li-mark" aria-hidden="true">in</span>
+            </div>
+            <p>
+              Most teams don’t need more ideas.<br />
+              <strong>They need a system that ships.</strong>
+            </p>
+            <div class="linkedin-lines"><span></span><span></span><span class="short-line"></span></div>
+            <div class="proof-card-footer">
+              <span>LINKEDIN / TEXT POST</span>
+              <span class="approved-label">✓ Ready</span>
+            </div>
+          </article>
+
+          <article class="proof-card proof-card-wide proof-card-dark" data-kind="X posts">
+            <div class="x-card-head">
+              <span class="x-mark">𝕏</span>
+              <span>
+                <strong>@averymorgan</strong>
+                <small>just now</small>
+              </span>
+            </div>
+            <p>
+              One honest conversation can become a month of momentum.<br />
+              <strong>That’s the whole point.</strong>
+            </p>
+            <div class="x-card-stats">
+              <span>↗ 18.4K views</span>
+              <span>♡ 642</span>
+              <span>↻ 94</span>
+            </div>
+            <div class="proof-card-footer">
+              <span>X / THREAD OPEN</span>
+              <span class="pending-label">Review</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="proof-endnote">
+          <span class="live-dot"></span> Showing all cuts from one long-form source
+        </div>
       </section>
 
-      <section class="section" id="pricing">
-        <div class="section-head reveal">
-          <p class="eyebrow">Pricing</p>
-          <h2>Subscribe to open the studio</h2>
-          <p>Every plan includes a 7-day trial. Cancel before it ends and you won’t be charged.</p>
-          <div class="bill-toggle" role="group" aria-label="Billing interval">
-            <button type="button" class="on" data-interval="month">Monthly</button>
-            <button type="button" data-interval="year">Yearly <em>2 months free</em></button>
+      <section class="section how-section" id="how-it-works">
+        <div class="process-layout">
+          <div class="process-copy">
+            <div class="section-eyebrow"><span class="eyebrow-rule" aria-hidden="true"></span>THE PROCESS / 03 STEPS</div>
+            <h2>
+              From raw footage<br />
+              <em>to ready to publish.</em>
+            </h2>
+          </div>
+
+          <ol class="process-steps">
+            <li>
+              <span class="process-num">01</span>
+              <div class="process-body">
+                <h3>Upload or paste URL</h3>
+                <p>Drop an MP4 or paste a YouTube link. creatorOS takes the whole conversation in one pass.</p>
+              </div>
+              <span class="process-icon" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 7.5h4"/><path d="M3 12h18"/><path d="M3 16.5h4"/><path d="M17 3v18"/><path d="M17 7.5h4"/><path d="M17 16.5h4"/></svg>
+              </span>
+            </li>
+            <li>
+              <span class="process-num">02</span>
+              <div class="process-body">
+                <h3>Cuts + copy, in context</h3>
+                <p>The studio finds high-signal moments, writes native hooks, and formats each idea for its channel.</p>
+              </div>
+              <span class="process-icon" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg>
+              </span>
+            </li>
+            <li>
+              <span class="process-num">03</span>
+              <div class="process-body">
+                <h3>Review &amp; calendar</h3>
+                <p>Move pieces around your month. Approve, edit, or reject before anything goes near a social account.</p>
+              </div>
+              <span class="process-icon" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/></svg>
+              </span>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section control-section" id="control">
+        <div class="control-layout">
+          <div class="control-copy">
+            <p class="eyebrow">Control</p>
+            <h2>
+              The calendar is yours.<br />
+              <em>Keep your hands on the switch.</em>
+            </h2>
+            <p class="control-lede">
+              Pause a date. Move a post. Kill a cut. Nothing auto-posts until you give it a greenlight.
+            </p>
+            <ul class="control-points">
+              <li><span aria-hidden="true">✓</span> Approve or reject in one click</li>
+              <li><span aria-hidden="true">✓</span> Pause days, channels, or the whole run</li>
+              <li><span aria-hidden="true">✓</span> Edit the hook before it leaves the room</li>
+            </ul>
+          </div>
+
+          <article class="review-deck" aria-label="Review deck preview">
+            <div class="review-deck-top">
+              <span>REVIEW DECK / 04 OF 27</span>
+              <span class="pending-pill"><span class="live-dot"></span> PENDING REVIEW</span>
+            </div>
+            <div
+              class="review-deck-media"
+              style="background-image:url('https://images.unsplash.com/photo-1646198022729-abdd8ad64cff?auto=format&amp;fit=crop&amp;w=900&amp;q=85')"
+            >
+              <button type="button" class="review-play" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg>
+              </button>
+              <p class="review-quote">“You don’t need to be louder. You need to be clearer.”</p>
+            </div>
+            <div class="review-deck-meta">
+              <div>
+                <strong>REEL / 00:38</strong>
+                <span>Founder story — alt hook</span>
+              </div>
+              <span class="review-date">Jun 18</span>
+            </div>
+            <div class="review-deck-actions">
+              <button type="button" class="chip">✕ Reject</button>
+              <button type="button" class="chip">❚❚ Pause date</button>
+              <button type="button" class="chip chip-approve">✓ Approve</button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section access-section" id="access">
+        <div class="access-layout">
+          <div class="access-watermark" aria-hidden="true">
+            <strong>01</strong>
+            <span>email</span>
+          </div>
+
+          <div class="access-copy">
+            <div class="section-eyebrow"><span class="eyebrow-rule" aria-hidden="true"></span>ACCESS / NO PAYWALL TOUR</div>
+            <h2>
+              Start with one<br />
+              <em>real run.</em>
+            </h2>
+            <p class="access-lede">
+              Sign up with your email and generate your first full month free. See the cuts. Tune the calendar.
+              When you’re ready for another run, choose a plan and keep going.
+            </p>
+            <a class="button button-primary studio-link" href="/open-studio" data-studio-link>
+              Open studio
+              <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+            </a>
+            <p class="access-note">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+              No credit card required for your first demo.
+            </p>
+          </div>
+
+          <div class="access-flags" aria-hidden="true">
+            <span>ONE FREE DEMO PER EMAIL</span>
+            <span>PAY TO CONTINUE</span>
           </div>
         </div>
-        <div class="plans">
-          <article class="plan reveal" data-plan="starter">
-            <h3>Starter</h3>
-            <p>A light cadence from a couple of source videos.</p>
-            <div class="price">
-              <strong data-price-month="$29" data-price-year="$24">$29</strong>
-              <span data-cadence>/ month</span>
-            </div>
-            <p class="billed" data-billed-year="Billed $290 yearly">Billed monthly</p>
-            <ul>
-              <li>2 source videos each month</li>
-              <li>YouTube Shorts and Instagram Reels</li>
-              <li>14-day content calendar</li>
-              <li>Captions on every cut</li>
-              <li>Email support</li>
-            </ul>
-            <button type="button" class="secondary-btn full" data-checkout="starter">Start Starter trial</button>
-          </article>
-          <article class="plan featured reveal" data-plan="creator">
-            <p class="plan-note">Most chosen</p>
-            <h3>Creator</h3>
-            <p>One video in. A month of content across every channel.</p>
-            <div class="price">
-              <strong data-price-month="$89" data-price-year="$74">$89</strong>
-              <span data-cadence>/ month</span>
-            </div>
-            <p class="billed" data-billed-year="Billed $890 yearly">Billed monthly</p>
-            <ul>
-              <li>12 source videos each month</li>
-              <li>Shorts, Reels, LinkedIn, and X</li>
-              <li>30-day calendar with pause and skip</li>
-              <li>Platform-specific copy</li>
-              <li>Brand end screens and logo</li>
-              <li>Priority email support</li>
-            </ul>
-            <button type="button" class="primary-btn full" data-checkout="creator">Start Creator trial</button>
-          </article>
-          <article class="plan reveal" data-plan="studio">
-            <h3>Studio</h3>
-            <p>Unlimited runs for teams that ship every week.</p>
-            <div class="price">
-              <strong data-price-month="$199" data-price-year="$166">$199</strong>
-              <span data-cadence>/ month</span>
-            </div>
-            <p class="billed" data-billed-year="Billed $1,990 yearly">Billed monthly</p>
-            <ul>
-              <li>Unlimited source videos</li>
-              <li>Everything in Creator</li>
-              <li>Multiple workspaces and brands</li>
-              <li>Priority processing queue</li>
-              <li>Shared calendar control</li>
-              <li>Onboarding call</li>
-            </ul>
-            <button type="button" class="secondary-btn full" data-checkout="studio">Start Studio trial</button>
-          </article>
-        </div>
-        <p class="fine">Secure checkout by Stripe. Change or cancel anytime from the customer portal.</p>
       </section>
 
-      <section class="section faq">
-        <div class="section-head reveal">
-          <p class="eyebrow">FAQ</p>
-          <h2>Before you subscribe</h2>
-        </div>
-        <div class="faq-list">
-          <details class="reveal" open>
-            <summary>Does this publish to my accounts automatically?</summary>
-            <p>No. The calendar is a plan. Nothing goes live until you approve it.</p>
-          </details>
-          <details class="reveal">
-            <summary>What can I upload?</summary>
-            <p>A public YouTube or podcast URL, or an MP4 / MOV / MKV / WebM file. Long-form talks and interviews work best.</p>
-          </details>
-          <details class="reveal">
-            <summary>Do I have to connect social accounts?</summary>
-            <p>No. Generate and download a full campaign without connecting. Connect later when you’re ready to publish.</p>
-          </details>
-          <details class="reveal">
-            <summary>How does the trial work?</summary>
-            <p>New subscriptions include 7 days free. Cancel in Stripe before the trial ends and you won’t be charged.</p>
-          </details>
+      <section class="section faq-section" id="faq">
+        <div class="faq-layout">
+          <div class="faq-copy">
+            <div class="section-eyebrow"><span class="eyebrow-rule" aria-hidden="true"></span>FAQ / THE SHORT VERSION</div>
+            <h2>
+              Good
+              <br />
+              questions.
+              <br />
+              <em>Clear</em>
+              <br />
+              <em>answers.</em>
+            </h2>
+          </div>
+          <div class="faq-list" id="faq-list"></div>
         </div>
       </section>
 
-      <section class="final-cta reveal">
-        <div>
-          <p class="brand-mark small">creatorOS</p>
-          <h2>Open the studio when you’re ready to ship.</h2>
-        </div>
-        <a class="primary-btn lg" href="#pricing">Choose a plan</a>
+      <section class="section final-section">
+        <span class="brand-mark brand-mark-compact" data-testid="footer-brand-mark">
+          <img class="brand-logo" src="/logo.png?v=2" alt="creatorOS" width="28" height="28" />
+          <span class="brand-wordmark" data-testid="footer-brand-wordmark">creator<b>OS</b></span>
+        </span>
+        <h2>
+          Make more of
+          <br />
+          <em>the good stuff.</em>
+        </h2>
+        <p>One conversation is enough to fill the month.</p>
+        <a class="button-primary studio-link" href="/open-studio" data-studio-link>Open studio <span aria-hidden="true">↗</span></a>
       </section>
+
+      <footer class="site-foot">
+        <span class="brand-wordmark">creator<b>OS</b></span>
+        <p>© <span data-year></span> · One free demo per email · Nothing publishes until you approve</p>
+      </footer>
     </main>
 
-    <footer class="foot">
-      <a class="brand" href="#top">
-        <img src="/logo.png" alt="" width="28" height="28" />
-        <span>creatorOS</span>
-      </a>
-      <p>© <span data-year></span> creatorOS. Private software — subscribe to use the studio.</p>
-    </footer>
-
-    <div class="toast" id="toast" hidden role="status"></div>
-    <script src="/app.js"></script>
+    <script src="/app.js?v=13"></script>
   </body>
 </html>

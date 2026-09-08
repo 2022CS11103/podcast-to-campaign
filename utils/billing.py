@@ -124,13 +124,70 @@ def stripe_configured() -> bool:
 
 
 def billing_enforced() -> bool:
-    """Paywall only when explicitly enforced — safe default for testing.
-
-    Set BILLING_ENFORCE=true (plus BILLING_ENABLED and a valid Stripe secret)
-    when you are ready to charge. Until then packs stay preview-only.
-    """
+    """True when Stripe packs are required (after free demo is used)."""
     enforce = (os.getenv("BILLING_ENFORCE") or "").strip().lower() in {"1", "true", "yes", "on"}
     return enforce and billing_enabled() and stripe_configured()
+
+
+def free_demo_gate_enabled() -> bool:
+    """One free campaign per email, then pay. Default on."""
+    soft = (os.getenv("BILLING_FREE_DEMO") or "true").strip().lower()
+    return soft not in {"0", "false", "no", "off"}
+
+
+DEMO_FILE = PROJECT_ROOT / "memory" / "free_demos.json"
+
+
+def _load_demos() -> dict:
+    if not DEMO_FILE.exists():
+        return {"emails": {}}
+    try:
+        return json.loads(DEMO_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"emails": {}}
+
+
+def _save_demos(data: dict) -> None:
+    DEMO_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DEMO_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def free_demo_used(email: str | None) -> bool:
+    key = normalize_email(email)
+    if not key:
+        return False
+    with _lock:
+        row = (_load_demos().get("emails") or {}).get(key) or {}
+        return bool(row.get("used"))
+
+
+def mark_free_demo_used(email: str | None) -> None:
+    key = normalize_email(email)
+    if not key:
+        return
+    with _lock:
+        data = _load_demos()
+        emails = data.setdefault("emails", {})
+        emails[key] = {"used": True, "at": __import__("time").time()}
+        _save_demos(data)
+
+
+def stripe_entitled(email: str | None) -> bool:
+    """True only for an active paid Stripe pack (ignores free demo)."""
+    key = normalize_email(email)
+    if not key:
+        return False
+    if key in bypass_emails():
+        return True
+    row = get_record(key)
+    if (row.get("status") or "").lower() not in ACTIVE_STATUSES:
+        return False
+    try:
+        if int(row.get("max_campaign_days") or 0) > 0:
+            return True
+    except (TypeError, ValueError):
+        pass
+    return bool(max_days_for_plan_id(row.get("plan")))
 
 
 def bypass_emails() -> set[str]:
@@ -287,24 +344,34 @@ def find_email_by_customer(customer_id: str | None) -> str:
 
 
 def entitled_max_days(email: str | None) -> int:
-    """Highest campaign duration (days) this subscriber may generate."""
-    if not billing_enforced():
-        return 60
+    """Highest campaign duration (days) this user may generate."""
     key = normalize_email(email)
-    if not key:
-        return 0
-    if key in bypass_emails():
+    if key and key in bypass_emails():
         return 60
-    row = get_record(key)
-    if (row.get("status") or "").lower() not in ACTIVE_STATUSES:
-        return 0
-    stored = row.get("max_campaign_days")
-    try:
-        if stored is not None:
-            return max(0, int(stored))
-    except (TypeError, ValueError):
-        pass
-    return max_days_for_plan_id(row.get("plan")) or 30
+
+    # Paid Stripe pack
+    if key:
+        row = get_record(key)
+        if (row.get("status") or "").lower() in ACTIVE_STATUSES:
+            stored = row.get("max_campaign_days")
+            try:
+                if stored is not None and int(stored) > 0:
+                    return int(stored)
+            except (TypeError, ValueError):
+                pass
+            plan_days = max_days_for_plan_id(row.get("plan"))
+            if plan_days:
+                return plan_days
+
+    # One free demo per email
+    if free_demo_gate_enabled() and key and not free_demo_used(key):
+        return 60
+
+    # Fully open (demo gate off and Stripe not enforced)
+    if not billing_enforced() and not free_demo_gate_enabled():
+        return 60
+
+    return 0
 
 
 def has_access(email: str | None) -> bool:
@@ -322,61 +389,62 @@ def can_run_campaign(email: str | None, campaign_days: int | None) -> bool:
 def status_payload(email: str | None) -> dict:
     key = normalize_email(email)
     flag_on = billing_enabled()
-    enforced = billing_enforced()
+    checkout = flag_on and stripe_configured()
     row = get_record(key) if key else {}
     status = (row.get("status") or "none").lower()
+    demo_used = free_demo_used(key) if key else False
+    paid = stripe_entitled(key) if key else False
     max_days = entitled_max_days(key) if key else 0
+    demo_remaining = 0 if (not key or demo_used or paid) else (1 if free_demo_gate_enabled() else 0)
 
-    # Testing / preview: show packs optionally, never block generation.
-    if not enforced:
-        return {
-            "billing_enabled": False,
-            "billing_preview": flag_on,
-            "checkout_ready": False,
-            "email": key,
-            "entitled": True,
-            "status": "active",
-            "plan": "dev",
-            "max_campaign_days": 60,
-            "campaign_durations": list(CAMPAIGN_DURATIONS),
-            "price_id": "",
-            "current_period_end": None,
-            "stripe_customer_id": (row.get("stripe_customer_id") or ""),
-            "plans": plans(),
-            "message": (
-                "Billing is optional right now (preview only). "
-                "When ready to charge: BILLING_ENABLED=true, BILLING_ENFORCE=true, "
-                "and a valid STRIPE_SECRET_KEY."
-                if flag_on
-                else None
-            ),
-        }
-
-    entitled = max_days > 0 and status in ACTIVE_STATUSES
-    if not entitled:
+    if paid:
+        entitled = max_days > 0
+        plan = row.get("plan") or "pro"
+        message = None
+    elif free_demo_gate_enabled() and key and not demo_used:
+        entitled = True
+        plan = "free_demo"
+        status = "demo"
+        max_days = 60
+        message = "One free demo included with this email. After that, pay to continue."
+    elif free_demo_gate_enabled() and demo_used and not paid:
+        entitled = False
+        plan = "free"
+        status = "demo_used"
         max_days = 0
-        if status in ACTIVE_STATUSES:
-            status = "none"
+        message = "You've used your free demo. Choose a campaign pack to keep generating."
+    elif not billing_enforced():
+        entitled = True
+        plan = "dev"
+        status = "active"
+        max_days = 60
+        message = (
+            "Billing preview — packs shown, generation open."
+            if flag_on
+            else None
+        )
+    else:
+        entitled = False
+        plan = row.get("plan") or "free"
+        message = "Pick a campaign pack (14 / 30 / 45 / 60 days) to generate."
 
     return {
-        "billing_enabled": True,
-        "billing_preview": False,
-        "checkout_ready": True,
+        "billing_enabled": True if (checkout or demo_used or free_demo_gate_enabled()) else flag_on,
+        "billing_preview": flag_on and not checkout,
+        "checkout_ready": checkout,
         "email": key,
         "entitled": entitled,
         "status": status,
-        "plan": row.get("plan") or "free",
+        "plan": plan,
         "max_campaign_days": max_days,
         "campaign_durations": list(CAMPAIGN_DURATIONS),
         "price_id": row.get("price_id") or "",
         "current_period_end": row.get("current_period_end"),
-        "stripe_customer_id": row.get("stripe_customer_id") or "",
+        "stripe_customer_id": (row.get("stripe_customer_id") or ""),
         "plans": plans(),
-        "message": (
-            None
-            if entitled
-            else "Pick a campaign pack (14 / 30 / 45 / 60 days) to generate."
-        ),
+        "demo_remaining": demo_remaining,
+        "demo_exhausted": bool(demo_used and not paid),
+        "message": message,
     }
 
 

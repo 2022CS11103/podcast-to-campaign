@@ -121,16 +121,19 @@ export function recommendPlan(plans, durationDays) {
 }
 
 function isSubscribed(billing) {
+  if (billing?.demo_exhausted && !billing?.checkout_ready) return false;
+  if (String(billing?.plan || "") === "free_demo") return false;
   if (!billing?.billing_enabled || !billing?.checkout_ready) return false;
   const maxDays = Number(billing?.max_campaign_days || 0);
   const status = String(billing?.status || "").toLowerCase();
   if (maxDays <= 0) return false;
-  if (["none", "canceled", "cancelled", "incomplete"].includes(status)) return false;
+  if (["none", "canceled", "cancelled", "incomplete", "demo", "demo_used"].includes(status)) return false;
   return Boolean(billing?.entitled) && maxDays > 0;
 }
 
-/** Paywall only when Stripe checkout is explicitly ready to charge. */
+/** Show paywall when free demo is used, or Stripe says not entitled. */
 export function paywallActive(billing) {
+  if (billing?.entitled === false && billing?.demo_exhausted) return true;
   return Boolean(
     billing?.billing_enabled
     && billing?.checkout_ready === true
@@ -367,15 +370,19 @@ export function BillingPanel({ durationDays = 30 }) {
       </div>
 
       <p className="account-copy">
-        {!enabled
-          ? (billing?.billing_preview
-            ? "Billing is optional while you test. Packs are preview-only — generation stays open. Turn on a real Stripe key later to charge."
-            : "Choose a campaign length that matches your calendar.")
-          : subscribed
-            ? `Status: ${status}. You can generate calendars up to ${maxDays} days — upgrade if you need a longer run.`
-            : `No active pack yet (status: ${status}). Pick the pack that matches your ${durationDays}-day campaign — recommended: ${recommended?.name || "Standard · 30 days"}.`}
+        {billing?.demo_exhausted
+          ? "You've used your free demo on this email. Choose a campaign pack to pay and keep generating."
+          : billing?.demo_remaining === 1
+            ? "One free demo is included with this email. After that run, you'll need a paid pack."
+            : !enabled
+              ? (billing?.billing_preview
+                ? "Billing is optional while you test. Packs are preview-only — generation stays open. Turn on a real Stripe key later to charge."
+                : "Choose a campaign length that matches your calendar.")
+              : subscribed
+                ? `Status: ${status}. You can generate calendars up to ${maxDays} days — upgrade if you need a longer run.`
+                : `No active pack yet (status: ${status}). Pick the pack that matches your ${durationDays}-day campaign — recommended: ${recommended?.name || "Standard · 30 days"}.`}
       </p>
-      {billing?.message && !enabled ? (
+      {billing?.message ? (
         <p className="account-copy">{billing.message}</p>
       ) : null}
       {billingFlag === "success" ? (

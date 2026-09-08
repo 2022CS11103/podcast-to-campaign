@@ -123,7 +123,7 @@ function AppShell({ children, step, flow = true }) {
     { to: "/transcript", label: "Transcript", icon: FileText, active: path.startsWith("/transcript") },
     { to: "/results/latest", label: "Library", icon: BarChart3, active: path.startsWith("/results") || path.startsWith("/complete") },
     { to: "/accounts", label: "Accounts", icon: Link2, active: path.startsWith("/accounts") },
-    { to: "/workspace", label: "Billing", icon: CreditCard, active: path.startsWith("/workspace") },
+    { to: "/workspace", label: "Settings", icon: CreditCard, active: path.startsWith("/workspace") },
   ];
 
   return (
@@ -868,9 +868,13 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
     && Number(billing?.max_campaign_days || 0) > 0
     && Number(campaign.durationDays) > Number(billing.max_campaign_days)
   );
-  const showPlansTeaser = !needsPaywall && !durationCapped;
   const plans = billing?.plans || [];
   const blockGenerate = needsPaywall || durationCapped;
+  const demoNote = billing?.demo_remaining === 1
+    ? "One free demo left on this email."
+    : billing?.demo_exhausted
+      ? "Free demo used — pay to continue."
+      : null;
 
   return (
     <AppShell step="strategy">
@@ -881,12 +885,13 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
       {needsPaywall ? (
         <div style={{ marginBottom: 18 }}>
           <PaywallCard
+            title="You've used your free demo"
             busy={busy || billingLoading}
             billingEnabled={checkoutReady}
             plans={plans}
             durationDays={campaign.durationDays}
             onUpgrade={(priceId, days) => startCheckout(priceId, days || campaign.durationDays)}
-            description={`Unlock a ${campaign.durationDays}-day campaign pack — Shorts, Reels, LinkedIn/X copy, and the calendar.`}
+            description={billing?.message || "Pay to unlock another campaign — Shorts, Reels, LinkedIn/X copy, and the calendar."}
           />
           {billingError ? <Notice>{billingError}</Notice> : null}
         </div>
@@ -902,22 +907,7 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
             onUpgrade={(priceId, days) => startCheckout(priceId, days || campaign.durationDays)}
             description={`Your plan covers up to ${billing.max_campaign_days} days. This campaign is ${campaign.durationDays} days — upgrade the pack or shorten the duration.`}
           />
-          {billingError ? <Notice>{billingError}</Notice> : null}
         </div>
-      ) : null}
-      {showPlansTeaser && checkoutReady ? (
-        <section className="panel campaign-panel billing-teaser" style={{ marginBottom: 18 }}>
-          <div className="section-heading">
-            <div>
-              <h2>Plan covers up to {billing.max_campaign_days || "—"} days</h2>
-            </div>
-          </div>
-          <div className="page-actions">
-            <button className="secondary-button" onClick={() => navigate("/workspace#billing")}>
-              <CreditCard size={16} /> Manage billing
-            </button>
-          </div>
-        </section>
       ) : null}
       <div className="strategy-layout">
         <div className="strategy-grid">
@@ -945,6 +935,7 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
         <aside className="summary-card">
           <div className="summary-title"><Sparkles size={19} /><span>Campaign snapshot</span></div>
           <div className="summary-duration"><span>Duration</span><strong>{campaign.durationDays} days</strong></div>
+          {demoNote ? <p className="account-copy" style={{ marginTop: 8 }}>{demoNote}</p> : null}
           <div className="summary-list">
             {Object.entries(plan).filter(([, item]) => item.enabled).map(([key, item]) => (
               <div key={key}><span>{platformNames[key]}</span><strong>{item.count}</strong></div>
@@ -955,25 +946,14 @@ function StrategyPage({ campaign, plan, setPlan, onGenerate, generating }) {
             <div><Clock3 size={16} /><span>Estimated processing</span><strong>8–15 min</strong></div>
             <div><Film size={16} /><span>Distinct video edits</span><strong>{(plan.youtube_shorts.enabled ? plan.youtube_shorts.count : 0) + (plan.instagram_reels.enabled ? plan.instagram_reels.count : 0)}</strong></div>
           </div>
-          {blockGenerate && checkoutReady ? (
-            <button
-              className="primary-button full"
-              onClick={() => {
-                const pick = recommendPlan(plans, campaign.durationDays);
-                startCheckout(pick?.price_id, campaign.durationDays);
-              }}
-              disabled={busy || billingLoading || generating || !campaign.source}
-            >
-              {busy || generating ? <LoaderCircle className="spin" size={18} /> : <Rocket size={18} />}
-              {durationCapped ? "Upgrade pack to generate" : "Get campaign pack"}
-            </button>
-          ) : (
-            <button className="primary-button full" onClick={onGenerate} disabled={generating || !campaign.source}>
-              {generating ? <LoaderCircle className="spin" size={18} /> : <Rocket size={18} />}
-              {generating ? "Starting campaign…" : "Generate AI campaign"}
-            </button>
-          )}
-          <p className="privacy-note">You stay in control. CreatorOS prepares drafts and private uploads only.</p>
+          <button
+            className="primary-button full"
+            onClick={onGenerate}
+            disabled={generating || !campaign.source || blockGenerate}
+          >
+            {generating ? <LoaderCircle className="spin" size={18} /> : <Rocket size={18} />}
+            {needsPaywall ? "Pay to generate" : generating ? "Starting campaign…" : "Generate AI campaign"}
+          </button>
         </aside>
       </div>
       <div className="page-actions">
@@ -1987,8 +1967,8 @@ function WorkspacePage({ accounts, refreshAccounts, accountBusy, setCampaign, ca
   return (
     <AppShell flow={false}>
       <PageHeading
-        title="Billing & settings"
-        description="Manage your plan, branding, and connected accounts."
+        title="Settings"
+        description="Account, branding, and connected channels."
       />
       <BillingPanel durationDays={campaign?.durationDays || 30} />
       <section className="panel campaign-panel" style={{ marginTop: 18 }}>
@@ -2350,8 +2330,8 @@ function CreatorApp() {
       setCurrentJob(result.job_id);
       navigate(`/processing/${result.job_id}`);
     } catch (error) {
-      if (error?.status === 402 || /subscribe|subscription/i.test(error?.message || "")) {
-        window.alert(error.message || "Subscribe to Creator Pro to generate campaigns.");
+      if (error?.status === 402 || /subscribe|subscription|free demo|pay to/i.test(error?.message || "")) {
+        window.alert(error.message || "You've used your free demo. Pay in Settings to continue.");
         navigate("/workspace");
         return;
       }

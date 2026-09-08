@@ -18,6 +18,16 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 loadEnv(path.join(__dirname, ".env"));
 loadEnv(path.join(__dirname, "..", ".env"));
 
+/** Where the FastAPI studio lives (landing CTAs redirect here). */
+function resolveStudioUrl() {
+  const fromEnv = String(process.env.STUDIO_URL || "").trim();
+  if (fromEnv) return fromEnv.replace(/\/?$/, "/");
+  const publicUrl = String(process.env.PUBLIC_URL || "").trim().replace(/\/$/, "");
+  if (publicUrl) return `${publicUrl}/app/`;
+  return "http://127.0.0.1:8002/app/";
+}
+const STUDIO_URL = resolveStudioUrl();
+
 const TRIAL_DAYS = Math.max(0, Number(process.env.STRIPE_TRIAL_DAYS || 7));
 
 const PLANS = {
@@ -116,9 +126,19 @@ function sendFile(res, filePath) {
       send(res, 404, "Not found", { "Content-Type": "text/plain; charset=utf-8" });
       return;
     }
-    send(res, 200, data, {
-      "Content-Type": MIME[path.extname(resolved)] || "application/octet-stream",
-      "Cache-Control": [".html", ".css", ".js"].includes(path.extname(resolved))
+    let body = data;
+    const ext = path.extname(resolved);
+    // Inject studio URL so CTA buttons always deep-link into the app.
+    if (ext === ".html") {
+      const html = data.toString("utf8").replace(
+        /<\/head>/i,
+        `<script>window.__CREATOROS_STUDIO__=${JSON.stringify(STUDIO_URL)};</script>\n</head>`,
+      );
+      body = Buffer.from(html);
+    }
+    send(res, 200, body, {
+      "Content-Type": MIME[ext] || "application/octet-stream",
+      "Cache-Control": [".html", ".css", ".js"].includes(ext)
         ? "no-store"
         : "public, max-age=3600",
     });
@@ -308,7 +328,11 @@ function handler(req, res) {
   const route = url.pathname.replace(/\/+$/, "") || "/";
 
   if (req.method === "GET" && route === "/health") {
-    sendJson(res, 200, { status: "ok", service: "creatoros-paywall", stripe: stripeMode(), port: PORT });
+    sendJson(res, 200, { status: "ok", service: "creatoros-paywall", stripe: stripeMode(), port: PORT, studio: STUDIO_URL });
+    return;
+  }
+  if (req.method === "GET" && route === "/api/config") {
+    sendJson(res, 200, { studioUrl: STUDIO_URL, paywall: false });
     return;
   }
   if (req.method === "GET" && route === "/api/plans") {
@@ -316,10 +340,7 @@ function handler(req, res) {
     return;
   }
   if (req.method === "POST" && route === "/api/checkout") {
-    checkout(req, res).catch((error) => {
-      console.error(error);
-      sendJson(res, 500, { error: "Checkout failed." });
-    });
+    sendJson(res, 503, { error: "Checkout is paused — open the studio to explore for free." });
     return;
   }
   if (req.method === "GET" && route === "/api/session") {
@@ -330,7 +351,21 @@ function handler(req, res) {
     return;
   }
   if (req.method === "GET" || req.method === "HEAD") {
-    if (route === "/" || route === "/app" || route === "/login" || route === "/signup") {
+    if (
+      route === "/app"
+      || route === "/login"
+      || route === "/signup"
+      || route === "/open-studio"
+      || route === "/try"
+      || route === "/demo"
+      || route === "/trial"
+      || route === "/free-demo"
+    ) {
+      res.writeHead(302, { Location: STUDIO_URL });
+      res.end();
+      return;
+    }
+    if (route === "/") {
       sendFile(res, path.join(PUBLIC_DIR, "index.html"));
       return;
     }
@@ -354,5 +389,5 @@ server.on("error", (error) => {
   process.exit(1);
 });
 server.listen(PORT, HOST, () => {
-  console.log(`creatorOS paywall listening on http://${HOST}:${PORT}  stripe=${stripeMode()}`);
+  console.log(`creatorOS landing on http://${HOST}:${PORT}  studio=${STUDIO_URL}  (checkout paused)`);
 });

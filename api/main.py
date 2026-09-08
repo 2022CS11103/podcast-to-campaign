@@ -964,23 +964,43 @@ def process_video(
     except (TypeError, ValueError):
         campaign_days = 30
 
-    if billing_enforced() and not can_run_campaign(email, campaign_days):
+    if not can_run_campaign(email, campaign_days):
         allowed = entitled_max_days(email)
+        demo_gone = False
+        try:
+            from utils.billing import free_demo_used, stripe_entitled
+
+            demo_gone = free_demo_used(email) and not stripe_entitled(email)
+        except Exception:
+            demo_gone = False
         raise HTTPException(
             status_code=402,
             detail={
-                "error": "subscription_required",
+                "error": "subscription_required" if not demo_gone else "demo_exhausted",
                 "message": (
-                    f"Your plan covers up to {allowed}-day campaigns. "
-                    f"Upgrade to run a {campaign_days}-day calendar, or pick a shorter duration."
-                    if allowed
-                    else "Choose a campaign pack (14 / 30 / 45 / 60 days) to generate."
+                    "You've used your free demo. Choose a campaign pack in Settings to pay and continue."
+                    if demo_gone
+                    else (
+                        f"Your plan covers up to {allowed}-day campaigns. "
+                        f"Upgrade to run a {campaign_days}-day calendar, or pick a shorter duration."
+                        if allowed
+                        else "Choose a campaign pack (14 / 30 / 45 / 60 days) to generate."
+                    )
                 ),
                 "billing_url": "/app/workspace",
                 "campaign_days": campaign_days,
                 "max_campaign_days": allowed,
             },
         )
+
+    # Consume free demo when this run is not covered by a paid pack.
+    try:
+        from utils.billing import mark_free_demo_used, stripe_entitled
+
+        if email and not stripe_entitled(email):
+            mark_free_demo_used(email)
+    except Exception:
+        pass
 
     existing = job_manager.active_job()
     if existing:
