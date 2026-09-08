@@ -24,7 +24,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-body);
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.55;
   overflow-x: hidden;
 }
@@ -95,7 +95,7 @@ em { font-style: normal; color: var(--orange); }
 .brand-wordmark {
   color: var(--ink);
   font-family: var(--font-display);
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 500;
   letter-spacing: -0.075em;
 }
@@ -127,7 +127,7 @@ em { font-style: normal; color: var(--orange); }
 }
 .nav-links a {
   color: var(--copy);
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   font-weight: 500;
 }
 .nav-links a:hover { color: var(--ink); }
@@ -168,7 +168,7 @@ em { font-style: normal; color: var(--orange); }
   margin-bottom: 22px;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11.04px;
   letter-spacing: 1.4px;
   line-height: 14px;
   text-transform: uppercase;
@@ -183,7 +183,7 @@ em { font-style: normal; color: var(--orange); }
 .hero-copy h1 {
   margin: 0 0 24px;
   font-family: var(--font-display);
-  font-size: clamp(4.4rem, 7.4vw, 7.6rem);
+  font-size: clamp(4.3rem, 6.808vw, 7.5rem);
   font-weight: 700;
   letter-spacing: -0.075em;
   line-height: 0.92;
@@ -192,7 +192,7 @@ em { font-style: normal; color: var(--orange); }
   max-width: 36rem;
   margin: 0 0 28px;
   color: var(--copy);
-  font-size: 21px;
+  font-size: 20px;
   line-height: 1.6;
 }
 .hero-cta-row {
@@ -208,7 +208,7 @@ em { font-style: normal; color: var(--orange); }
   justify-content: center;
   gap: 9px;
   min-height: 54px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.12px;
 }
@@ -234,7 +234,7 @@ em { font-style: normal; color: var(--orange); }
   margin: 0;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11.04px;
   letter-spacing: 0.02em;
 }
 
@@ -257,7 +257,7 @@ em { font-style: normal; color: var(--orange); }
   justify-content: space-between;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10.12px;
   letter-spacing: 0.08em;
 }
 .plane-topline { margin-bottom: 10px; }
@@ -269,7 +269,7 @@ em { font-style: normal; color: var(--orange); }
 }
 .plane-footer {
   padding-top: 14px;
-  font-size: 10px;
+  font-size: 9.2px;
   border-top: 1px solid var(--line-soft);
   margin-top: 12px;
 }
@@ -332,13 +332,13 @@ em { font-style: normal; color: var(--orange); }
   margin-bottom: 10px;
   color: rgba(255,255,255,.72);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.2px;
   letter-spacing: 0.12em;
 }
 .frame-overlay-copy strong {
   display: block;
   font-family: var(--font-display);
-  font-size: clamp(1.3rem, 1.9vw, 1.65rem);
+  font-size: clamp(1.2rem, 1.748vw, 1.55rem);
   font-weight: 700;
   letter-spacing: -0.04em;
   line-height: 1.15;
@@ -350,7 +350,7 @@ em { font-style: normal; color: var(--orange); }
   z-index: 4;
   color: rgba(255,255,255,.78);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.2px;
   letter-spacing: 0.06em;
 }
 .frame-play {
@@ -385,7 +385,7 @@ em { font-style: normal; color: var(--orange); }
   justify-content: space-between;
   color: var(--copy);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10.12px;
   letter-spacing: 0.08em;
 }
 .calendar-grid {
@@ -400,7 +400,7 @@ em { font-style: normal; color: var(--orange); }
   width: 100%;
   aspect-ratio: 1;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 8.28px;
 }
 .calendar-day-active {
   background: var(--red);
@@ -412,7 +412,7 @@ em { font-style: normal; color: var(--orange); }
   gap: 8px;
   color: var(--copy);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.2px;
 }
 .summary-line {
   width: 10px;
@@ -428,7 +428,7 @@ em { font-style: normal; color: var(--orange); }
   margin-top: 16px;
   color: #8b8a8e;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9.2px;
   letter-spacing: 1.08px;
 }
 .timeline-track {
@@ -466,7 +466,7 @@ em { font-style: normal; color: var(--orange); }
   margin-bottom: 4px;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 11.96px;
   letter-spacing: 0.12em;
 }
 .eyebrow-rule {
@@ -478,7 +478,7 @@ em { font-style: normal; color: var(--orange); }
   margin: 0;
   max-width: 18ch;
   font-family: var(--font-display);
-  font-size: clamp(3.6rem, 6.8vw, 6.1rem);
+  font-size: clamp(3.5rem, 6.256vw, 6rem);
   font-weight: 700;
   letter-spacing: -0.07em;
   line-height: 0.94;
@@ -487,13 +487,13 @@ em { font-style: normal; color: var(--orange); }
   max-width: 34rem;
   margin: 0;
   color: var(--copy);
-  font-size: 20px;
+  font-size: 19px;
   line-height: 1.55;
 }
 .eyebrow {
   margin: 0 0 14px;
   color: var(--orange);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -501,14 +501,14 @@ em { font-style: normal; color: var(--orange); }
 .section-copy h2 {
   margin: 0 0 16px;
   font-family: var(--font-display);
-  font-size: clamp(3.2rem, 6vw, 5.1rem);
+  font-size: clamp(3.1rem, 5.52vw, 5rem);
   font-weight: 700;
   letter-spacing: -0.07em;
   line-height: 0.95;
 }
 .section-copy p {
   color: var(--copy);
-  font-size: 20px;
+  font-size: 19px;
   margin-bottom: 12px;
 }
 
@@ -526,7 +526,7 @@ em { font-style: normal; color: var(--orange); }
   background: transparent;
   color: var(--muted);
   padding: 8px 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -582,7 +582,7 @@ em { font-style: normal; color: var(--orange); }
   gap: 6px;
   color: #fff;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11.04px;
   letter-spacing: 0.08em;
 }
 .proof-subtitle {
@@ -591,7 +591,7 @@ em { font-style: normal; color: var(--orange); }
   bottom: 20px;
   color: rgba(255,255,255,.9);
   font-family: var(--font-display);
-  font-size: clamp(1.65rem, 2.3vw, 2.1rem);
+  font-size: clamp(1.55rem, 2.116vw, 2rem);
   font-weight: 600;
   letter-spacing: -0.04em;
   line-height: 1.12;
@@ -605,7 +605,7 @@ em { font-style: normal; color: var(--orange); }
   padding: 13px 14px;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10.12px;
   letter-spacing: 0.04em;
   border-top: 1px solid var(--line-soft);
 }
@@ -645,18 +645,18 @@ em { font-style: normal; color: var(--orange); }
   background: var(--orange);
   color: #111;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
 }
 .linkedin-card-head strong,
 .x-card-head strong {
   display: block;
-  font-size: 16px;
+  font-size: 15px;
 }
 .linkedin-card-head small,
 .x-card-head small {
   display: block;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 11.96px;
   margin-top: 2px;
 }
 .li-mark {
@@ -666,12 +666,12 @@ em { font-style: normal; color: var(--orange); }
   place-items: center;
   background: #0a66c2;
   color: #fff;
-  font-size: 12px;
+  font-size: 11.04px;
   font-weight: 700;
   border-radius: 3px;
 }
 .x-mark {
-  font-size: 22px;
+  font-size: 21px;
   line-height: 1;
 }
 .proof-card-wide > p {
@@ -683,7 +683,7 @@ em { font-style: normal; color: var(--orange); }
   text-align: center;
   color: rgba(244, 243, 239, 0.72);
   font-family: var(--font-display);
-  font-size: clamp(1.75rem, 2.3vw, 2.25rem);
+  font-size: clamp(1.65rem, 2.116vw, 2.15rem);
   font-weight: 600;
   line-height: 1.22;
   letter-spacing: -0.035em;
@@ -709,7 +709,7 @@ em { font-style: normal; color: var(--orange); }
   justify-content: center;
   gap: 16px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   margin: 4px 0 10px;
 }
 .proof-card-wide .proof-card-footer {
@@ -722,7 +722,7 @@ em { font-style: normal; color: var(--orange); }
   gap: 8px;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11.04px;
   letter-spacing: 0.04em;
 }
 
@@ -740,12 +740,12 @@ em { font-style: normal; color: var(--orange); }
 }
 .process-copy .section-eyebrow {
   margin-bottom: 18px;
-  font-size: 15px;
+  font-size: 14px;
 }
 .process-copy h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(4.3rem, 7.4vw, 7rem);
+  font-size: clamp(4.2rem, 6.808vw, 6.9rem);
   font-weight: 700;
   letter-spacing: -0.07em;
   line-height: 0.92;
@@ -768,7 +768,7 @@ em { font-style: normal; color: var(--orange); }
 .process-num {
   color: var(--orange);
   font-family: var(--font-mono);
-  font-size: 19px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: 0.06em;
   padding-top: 6px;
@@ -776,7 +776,7 @@ em { font-style: normal; color: var(--orange); }
 .process-body h3 {
   margin: 0 0 10px;
   font-family: var(--font-display);
-  font-size: clamp(1.9rem, 2.5vw, 2.3rem);
+  font-size: clamp(1.8rem, 2.3vw, 2.2rem);
   font-weight: 700;
   letter-spacing: -0.03em;
 }
@@ -784,7 +784,7 @@ em { font-style: normal; color: var(--orange); }
   margin: 0;
   max-width: none;
   color: var(--copy);
-  font-size: 1.4rem;
+  font-size: 1.3rem;
   line-height: 1.55;
 }
 .process-icon {
@@ -820,12 +820,12 @@ em { font-style: normal; color: var(--orange); }
 }
 .control-copy .eyebrow {
   margin-bottom: 14px;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
 }
 .control-copy h2 {
   margin: 0 0 18px;
   font-family: var(--font-display);
-  font-size: clamp(3.8rem, 6.6vw, 6rem);
+  font-size: clamp(3.7rem, 6.072vw, 5.9rem);
   font-weight: 700;
   letter-spacing: -0.07em;
   line-height: 0.95;
@@ -835,7 +835,7 @@ em { font-style: normal; color: var(--orange); }
   margin: 0 0 22px;
   max-width: 38rem;
   color: var(--copy);
-  font-size: 1.4rem;
+  font-size: 1.3rem;
   line-height: 1.55;
 }
 .control-points {
@@ -850,7 +850,7 @@ em { font-style: normal; color: var(--orange); }
   align-items: flex-start;
   gap: 10px;
   color: var(--ink);
-  font-size: 1.3rem;
+  font-size: 1.2rem;
   line-height: 1.4;
 }
 .control-points span {
@@ -873,7 +873,7 @@ em { font-style: normal; color: var(--orange); }
   margin-bottom: 8px;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 11.96px;
   letter-spacing: 0.08em;
 }
 .pending-pill {
@@ -921,7 +921,7 @@ em { font-style: normal; color: var(--orange); }
   margin: 0;
   color: #fff;
   font-family: var(--font-display);
-  font-size: clamp(1.7rem, 2.5vw, 2.2rem);
+  font-size: clamp(1.6rem, 2.3vw, 2.1rem);
   font-weight: 700;
   letter-spacing: -0.035em;
   line-height: 1.15;
@@ -936,18 +936,18 @@ em { font-style: normal; color: var(--orange); }
 .review-deck-meta strong {
   display: block;
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.06em;
   margin-bottom: 4px;
 }
 .review-deck-meta span {
   color: var(--copy);
-  font-size: 16px;
+  font-size: 15px;
 }
 .review-date {
   color: var(--muted) !important;
   font-family: var(--font-mono);
-  font-size: 14px !important;
+  font-size: 13px !important;
 }
 .review-deck-actions {
   display: grid;
@@ -957,7 +957,7 @@ em { font-style: normal; color: var(--orange); }
 .review-deck-actions .chip {
   width: 100%;
   min-height: 48px;
-  font-size: 15px;
+  font-size: 14px;
 }
 .chip {
   min-height: 50px;
@@ -966,7 +966,7 @@ em { font-style: normal; color: var(--orange); }
   background: transparent;
   color: var(--ink);
   font-weight: 600;
-  font-size: 16px;
+  font-size: 15px;
 }
 .chip-approve {
   border-color: var(--orange);
@@ -1012,7 +1012,7 @@ em { font-style: normal; color: var(--orange); }
 }
 .access-watermark strong {
   font-family: var(--font-display);
-  font-size: clamp(7rem, 14vw, 12rem);
+  font-size: clamp(6.9rem, 12.88vw, 11.9rem);
   font-weight: 700;
   line-height: 0.8;
   letter-spacing: -0.08em;
@@ -1022,7 +1022,7 @@ em { font-style: normal; color: var(--orange); }
   padding-bottom: 1.1em;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -1035,12 +1035,12 @@ em { font-style: normal; color: var(--orange); }
 }
 .access-copy .section-eyebrow {
   margin-bottom: 20px;
-  font-size: 15px;
+  font-size: 14px;
 }
 .access-copy h2 {
   margin: 0 0 24px;
   font-family: var(--font-display);
-  font-size: clamp(5.2rem, 9.5vw, 8.8rem);
+  font-size: clamp(5.1rem, 8.74vw, 8.7rem);
   font-weight: 700;
   letter-spacing: -0.08em;
   line-height: 0.9;
@@ -1050,7 +1050,7 @@ em { font-style: normal; color: var(--orange); }
   margin: 0 0 28px;
   max-width: 40rem;
   color: var(--copy);
-  font-size: 1.45rem;
+  font-size: 1.35rem;
   line-height: 1.55;
 }
 .access-copy .button-primary {
@@ -1064,7 +1064,7 @@ em { font-style: normal; color: var(--orange); }
   margin: 0;
   color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 13px;
   letter-spacing: 0.02em;
 }
 .access-flags {
@@ -1075,7 +1075,7 @@ em { font-style: normal; color: var(--orange); }
   gap: 6px;
   text-align: right;
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 11.96px;
   letter-spacing: 0.1em;
 }
 .access-flags span:first-child { color: var(--orange); }
@@ -1099,12 +1099,12 @@ em { font-style: normal; color: var(--orange); }
 }
 .faq-copy .section-eyebrow {
   margin-bottom: 22px;
-  font-size: 14px;
+  font-size: 13px;
 }
 .faq-copy h2 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(4.3rem, 8vw, 7.4rem);
+  font-size: clamp(4.2rem, 7.36vw, 7.3rem);
   font-weight: 700;
   letter-spacing: -0.08em;
   line-height: 0.9;
@@ -1131,7 +1131,7 @@ em { font-style: normal; color: var(--orange); }
   text-align: left;
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: clamp(1.2rem, 1.7vw, 1.5rem);
+  font-size: clamp(1.1rem, 1.564vw, 1.4rem);
   letter-spacing: -0.02em;
   line-height: 1.25;
   cursor: pointer;
@@ -1148,7 +1148,7 @@ em { font-style: normal; color: var(--orange); }
   flex: 0 0 auto;
   color: var(--orange);
   font-family: var(--font-mono);
-  font-size: 0.88rem;
+  font-size: 0.78rem;
   font-weight: 500;
   letter-spacing: 0.06em;
 }
@@ -1168,7 +1168,7 @@ em { font-style: normal; color: var(--orange); }
   margin: -6px 0 24px 42px;
   max-width: 36rem;
   color: var(--copy);
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   line-height: 1.55;
 }
 
@@ -1184,7 +1184,7 @@ em { font-style: normal; color: var(--orange); }
   margin: 8px 0 0;
   max-width: 14ch;
   font-family: var(--font-display);
-  font-size: clamp(4.1rem, 8.8vw, 7.8rem);
+  font-size: clamp(4rem, 8.096vw, 7.7rem);
   font-weight: 700;
   letter-spacing: -0.08em;
   line-height: 0.9;
@@ -1192,7 +1192,7 @@ em { font-style: normal; color: var(--orange); }
 .final-section > p {
   margin: 0;
   color: var(--copy);
-  font-size: clamp(1.2rem, 1.8vw, 1.4rem);
+  font-size: clamp(1.1rem, 1.656vw, 1.3rem);
 }
 
 .site-foot {
@@ -1202,9 +1202,9 @@ em { font-style: normal; color: var(--orange); }
   gap: 12px;
   padding: 22px clamp(20px, 5vw, 76px) 40px;
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
 }
-.site-foot .brand-wordmark { font-size: 18px; }
+.site-foot .brand-wordmark { font-size: 17px; }
 
 @media (max-width: 1080px) {
   .hero-section {
@@ -1237,7 +1237,7 @@ em { font-style: normal; color: var(--orange); }
   }
   .proof-card { min-height: 440px; }
   .proof-card-wide > p {
-    font-size: 1.65rem;
+    font-size: 1.55rem;
   }
 }
 
@@ -1255,7 +1255,7 @@ em { font-style: normal; color: var(--orange); }
     order: -1;
   }
   .access-watermark strong {
-    font-size: clamp(5.5rem, 28vw, 8rem);
+    font-size: clamp(5.4rem, 25.76vw, 7.9rem);
   }
   .access-flags {
     position: static;
@@ -1294,7 +1294,7 @@ em { font-style: normal; color: var(--orange); }
   .nav-links a { padding: 12px 10px; }
   .menu-btn { display: inline-flex; }
   .hero-section { padding: 78px 20px 84px; }
-  .hero-copy h1 { font-size: clamp(3.9rem, 17vw, 6.1rem); }
+  .hero-copy h1 { font-size: clamp(3.8rem, 15.64vw, 6rem); }
   .hero-media-composition {
     min-height: 360px;
     height: 360px;

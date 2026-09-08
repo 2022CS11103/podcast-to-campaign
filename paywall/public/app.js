@@ -2,12 +2,7 @@
   const year = document.querySelector("[data-year]");
   if (year) year.textContent = String(new Date().getFullYear());
 
-  const isLocal =
-    typeof location !== "undefined"
-    && (location.hostname === "127.0.0.1" || location.hostname === "localhost");
-  const DEFAULT_STUDIO = isLocal
-    ? "http://127.0.0.1:8002/app/?mode=signup"
-    : `${location.origin}/app/?mode=signup`;
+  const DEFAULT_STUDIO = "/app/?mode=signup";
 
   async function wireStudioLinks() {
     let studioUrl =
@@ -16,15 +11,26 @@
     try {
       const res = await fetch("/api/config", { cache: "no-store" });
       if (res.ok) {
-        const data = await res.json();
-        if (data?.studioUrl) studioUrl = String(data.studioUrl);
+        const type = res.headers.get("content-type") || "";
+        if (type.includes("application/json")) {
+          const data = await res.json();
+          if (data?.studioUrl) studioUrl = String(data.studioUrl);
+        }
       }
     } catch {
       /* fall back */
     }
-    studioUrl = String(studioUrl || DEFAULT_STUDIO);
+    studioUrl = String(studioUrl || DEFAULT_STUDIO).trim() || DEFAULT_STUDIO;
+    // Never point CTAs at the landing itself or a bare /open-studio loop.
+    if (
+      !studioUrl
+      || studioUrl === "/"
+      || studioUrl === "/open-studio"
+      || !/\/app\/?/i.test(studioUrl)
+    ) {
+      studioUrl = DEFAULT_STUDIO;
+    }
     if (!/[?&]mode=/.test(studioUrl) && !/[?&]signup=/.test(studioUrl)) {
-      studioUrl = studioUrl.replace(/\/?$/, "/");
       studioUrl += (studioUrl.includes("?") ? "&" : "?") + "mode=signup";
     }
 

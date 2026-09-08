@@ -14,24 +14,37 @@ const path = require("path");
 const PORT = Number(process.env.PORT || 8000);
 const HOST = process.env.HOST || "127.0.0.1";
 const PUBLIC_DIR = path.join(__dirname, "public");
+const FRONTEND_DIST = path.join(__dirname, "..", "frontend", "dist");
 
 loadEnv(path.join(__dirname, ".env"));
 loadEnv(path.join(__dirname, "..", ".env"));
 
-/** Where the FastAPI studio lives (landing CTAs open signup here). */
+/** Signup entry for landing CTAs. Prefer same-origin /app so one public port works. */
 function resolveStudioUrl() {
   const fromEnv = String(process.env.STUDIO_URL || "").trim();
   if (fromEnv) {
-    // Prefer signup entry for marketing CTAs unless already query-shaped.
     if (/[?&]mode=/.test(fromEnv) || /signup=/.test(fromEnv)) return fromEnv;
     const base = fromEnv.replace(/\/?$/, "/");
     return `${base}?mode=signup`;
   }
-  const publicUrl = String(process.env.PUBLIC_URL || "").trim().replace(/\/$/, "");
-  if (publicUrl) return `${publicUrl}/app/?mode=signup`;
-  return "http://127.0.0.1:8002/app/?mode=signup";
+  return "/app/?mode=signup";
 }
 const STUDIO_URL = resolveStudioUrl();
+
+/** FastAPI origin for API proxy (studio UI is served from frontend/dist under /app). */
+const STUDIO_BACKEND = String(
+  process.env.STUDIO_BACKEND || process.env.API_ORIGIN || "http://127.0.0.1:8002",
+).replace(/\/$/, "");
+
+const STUDIO_ENTRY_ROUTES = new Set([
+  "/login",
+  "/signup",
+  "/open-studio",
+  "/try",
+  "/demo",
+  "/trial",
+  "/free-demo",
+]);
 
 const TRIAL_DAYS = Math.max(0, Number(process.env.STRIPE_TRIAL_DAYS || 7));
 
@@ -120,9 +133,10 @@ function sendJson(res, status, data) {
   });
 }
 
-function sendFile(res, filePath) {
+function sendDiskFile(res, rootDir, filePath, { injectStudio = false } = {}) {
+  const root = path.resolve(rootDir);
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(path.resolve(PUBLIC_DIR))) {
+  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
     send(res, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" });
     return;
   }
@@ -133,8 +147,7 @@ function sendFile(res, filePath) {
     }
     let body = data;
     const ext = path.extname(resolved);
-    // Inject studio URL so CTA buttons always deep-link into the app.
-    if (ext === ".html") {
+    if (injectStudio && ext === ".html") {
       const html = data.toString("utf8").replace(
         /<\/head>/i,
         `<script>window.__CREATOROS_STUDIO__=${JSON.stringify(STUDIO_URL)};</script>\n</head>`,
@@ -148,6 +161,74 @@ function sendFile(res, filePath) {
         : "public, max-age=3600",
     });
   });
+}
+
+function sendFile(res, filePath) {
+  sendDiskFile(res, PUBLIC_DIR, filePath, { injectStudio: true });
+}
+
+function serveStudioApp(res, url) {
+  const index = path.join(FRONTEND_DIST, "index.html");
+  if (!fs.existsSync(index)) {
+    send(
+      res,
+      503,
+      "Studio UI is missing. Run `npm run build` inside frontend/.",
+      { "Content-Type": "text/plain; charset=utf-8" },
+    );
+    return;
+  }
+
+  let rel = decodeURIComponent(url.pathname).replace(/^\/app\/?/, "");
+  if (!rel || rel.endsWith("/")) {
+    sendDiskFile(res, FRONTEND_DIST, index);
+    return;
+  }
+
+  const candidate = path.join(FRONTEND_DIST, rel);
+  fs.stat(candidate, (err, stat) => {
+    if (!err && stat.isFile()) {
+      sendDiskFile(res, FRONTEND_DIST, candidate);
+      return;
+    }
+    // SPA fallback so /app/?mode=signup and client routes work.
+    sendDiskFile(res, FRONTEND_DIST, index);
+  });
+}
+
+function proxyToStudio(req, res, url) {
+  let target;
+  try {
+    target = new URL(STUDIO_BACKEND);
+  } catch {
+    sendJson(res, 502, { error: "STUDIO_BACKEND is invalid." });
+    return;
+  }
+
+  const headers = { ...req.headers, host: target.host };
+  delete headers["content-length"];
+
+  const upstream = (target.protocol === "https:" ? https : http).request(
+    {
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || (target.protocol === "https:" ? 443 : 80),
+      path: `${url.pathname}${url.search}`,
+      method: req.method,
+      headers,
+    },
+    (upRes) => {
+      res.writeHead(upRes.statusCode || 502, upRes.headers);
+      upRes.pipe(res);
+    },
+  );
+  upstream.on("error", (error) => {
+    console.error("studio proxy failed:", error.message);
+    sendJson(res, 502, {
+      error: "Studio API is not reachable. Start FastAPI or set STUDIO_BACKEND.",
+    });
+  });
+  req.pipe(upstream);
 }
 
 function publicOrigin(req) {
@@ -331,9 +412,17 @@ async function sessionLookup(req, res, url) {
 function handler(req, res) {
   const url = new URL(req.url || "/", `http://${req.headers.host || `${HOST}:${PORT}`}`);
   const route = url.pathname.replace(/\/+$/, "") || "/";
+  const underApp = url.pathname === "/app" || url.pathname.startsWith("/app/");
 
   if (req.method === "GET" && route === "/health") {
-    sendJson(res, 200, { status: "ok", service: "creatoros-paywall", stripe: stripeMode(), port: PORT, studio: STUDIO_URL });
+    sendJson(res, 200, {
+      status: "ok",
+      service: "creatoros-paywall",
+      stripe: stripeMode(),
+      port: PORT,
+      studio: STUDIO_URL,
+      backend: STUDIO_BACKEND,
+    });
     return;
   }
   if (req.method === "GET" && route === "/api/config") {
@@ -355,21 +444,21 @@ function handler(req, res) {
     });
     return;
   }
+
+  // Studio SPA (signup lives here: /app/?mode=signup)
+  if ((req.method === "GET" || req.method === "HEAD") && underApp) {
+    serveStudioApp(res, url);
+    return;
+  }
+
+  // Marketing shortcuts → signup screen
+  if ((req.method === "GET" || req.method === "HEAD") && STUDIO_ENTRY_ROUTES.has(route)) {
+    res.writeHead(302, { Location: STUDIO_URL });
+    res.end();
+    return;
+  }
+
   if (req.method === "GET" || req.method === "HEAD") {
-    if (
-      route === "/app"
-      || route === "/login"
-      || route === "/signup"
-      || route === "/open-studio"
-      || route === "/try"
-      || route === "/demo"
-      || route === "/trial"
-      || route === "/free-demo"
-    ) {
-      res.writeHead(302, { Location: STUDIO_URL });
-      res.end();
-      return;
-    }
     if (route === "/") {
       sendFile(res, path.join(PUBLIC_DIR, "index.html"));
       return;
@@ -381,11 +470,14 @@ function handler(req, res) {
         sendFile(res, filePath);
         return;
       }
-      sendFile(res, path.join(PUBLIC_DIR, "index.html"));
+      // Non-landing API / app routes → FastAPI
+      proxyToStudio(req, res, url);
     });
     return;
   }
-  send(res, 405, "Method not allowed", { "Content-Type": "text/plain; charset=utf-8" });
+
+  // POST/PUT/PATCH/DELETE → FastAPI (uploads, process, auth, etc.)
+  proxyToStudio(req, res, url);
 }
 
 const server = http.createServer(handler);
@@ -394,5 +486,7 @@ server.on("error", (error) => {
   process.exit(1);
 });
 server.listen(PORT, HOST, () => {
-  console.log(`creatorOS landing on http://${HOST}:${PORT}  studio=${STUDIO_URL}  (checkout paused)`);
+  console.log(
+    `creatorOS landing on http://${HOST}:${PORT}  studio=${STUDIO_URL}  backend=${STUDIO_BACKEND}  (checkout paused)`,
+  );
 });
