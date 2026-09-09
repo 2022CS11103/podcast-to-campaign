@@ -32,6 +32,16 @@ function resolveStudioUrl() {
   return "http://127.0.0.1:8002/app/?mode=signup";
 }
 const STUDIO_URL = resolveStudioUrl();
+const STUDIO_BACKEND = String(process.env.STUDIO_BACKEND || "").trim().replace(/\/$/, "");
+
+const LANDING_ROUTES = new Set([
+  "/",
+  "/health",
+  "/api/config",
+  "/api/plans",
+  "/api/session",
+  "/api/checkout",
+]);
 
 const TRIAL_DAYS = Math.max(0, Number(process.env.STRIPE_TRIAL_DAYS || 7));
 
@@ -156,6 +166,63 @@ function publicOrigin(req) {
   const host = req.headers["x-forwarded-host"] || req.headers.host || `${HOST}:${PORT}`;
   const proto = req.headers["x-forwarded-proto"] || "https";
   return `${proto}://${host}`;
+}
+
+function studioPathname(locationUrl) {
+  try {
+    return new URL(locationUrl, `http://${HOST}:${PORT}`).pathname.replace(/\/+$/, "") || "/";
+  } catch {
+    return "";
+  }
+}
+
+function wouldLoopToApp(locationUrl) {
+  const dest = studioPathname(locationUrl);
+  return dest === "/app" || dest.startsWith("/app/");
+}
+
+function proxyToStudio(req, res) {
+  if (!STUDIO_BACKEND) {
+    sendJson(res, 502, { error: "Set STUDIO_BACKEND=http://127.0.0.1:8002 so /app is proxied, not redirected." });
+    return;
+  }
+  const target = new URL(req.url || "/", STUDIO_BACKEND);
+  const transport = target.protocol === "https:" ? https : http;
+  const headers = { ...req.headers, host: target.host };
+  delete headers.connection;
+  const proxyReq = transport.request(
+    {
+      protocol: target.protocol,
+      hostname: target.hostname,
+      port: target.port || (target.protocol === "https:" ? 443 : 80),
+      path: `${target.pathname}${target.search}`,
+      method: req.method,
+      headers,
+    },
+    (proxyRes) => {
+      const outHeaders = { ...proxyRes.headers };
+      if (outHeaders.location) {
+        try {
+          const loc = new URL(outHeaders.location, STUDIO_BACKEND);
+          const backend = new URL(STUDIO_BACKEND);
+          if (loc.host === backend.host) {
+            outHeaders.location = `${publicOrigin(req)}${loc.pathname}${loc.search}${loc.hash}`;
+          }
+        } catch {
+          /* keep upstream Location */
+        }
+      }
+      res.writeHead(proxyRes.statusCode || 502, outHeaders);
+      proxyRes.pipe(res);
+    },
+  );
+  proxyReq.on("error", (error) => {
+    console.error("Studio proxy failed:", error.message);
+    if (!res.headersSent) {
+      sendJson(res, 502, { error: `Studio is unreachable at ${STUDIO_BACKEND}. Is FastAPI on 8002?` });
+    }
+  });
+  req.pipe(proxyReq);
 }
 
 function readBody(req) {
@@ -333,7 +400,14 @@ function handler(req, res) {
   const route = url.pathname.replace(/\/+$/, "") || "/";
 
   if (req.method === "GET" && route === "/health") {
-    sendJson(res, 200, { status: "ok", service: "creatoros-paywall", stripe: stripeMode(), port: PORT, studio: STUDIO_URL });
+    sendJson(res, 200, {
+      status: "ok",
+      service: "creatoros-paywall",
+      stripe: stripeMode(),
+      port: PORT,
+      studio: STUDIO_URL,
+      backend: STUDIO_BACKEND || null,
+    });
     return;
   }
   if (req.method === "GET" && route === "/api/config") {
@@ -356,6 +430,20 @@ function handler(req, res) {
     return;
   }
   if (req.method === "GET" || req.method === "HEAD") {
+    if (route === "/") {
+      sendFile(res, path.join(PUBLIC_DIR, "index.html"));
+      return;
+    }
+    const relative = decodeURIComponent(url.pathname);
+    const filePath = path.join(PUBLIC_DIR, relative);
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      sendFile(res, filePath);
+      return;
+    }
+    if (STUDIO_BACKEND && !LANDING_ROUTES.has(route)) {
+      proxyToStudio(req, res);
+      return;
+    }
     if (
       route === "/app"
       || route === "/login"
@@ -366,23 +454,18 @@ function handler(req, res) {
       || route === "/trial"
       || route === "/free-demo"
     ) {
-      res.writeHead(302, { Location: STUDIO_URL });
+      const dest = wouldLoopToApp(STUDIO_URL)
+        ? "http://127.0.0.1:8002/app/?mode=signup"
+        : STUDIO_URL;
+      res.writeHead(302, { Location: dest });
       res.end();
       return;
     }
-    if (route === "/") {
-      sendFile(res, path.join(PUBLIC_DIR, "index.html"));
-      return;
-    }
-    const relative = decodeURIComponent(url.pathname);
-    const filePath = path.join(PUBLIC_DIR, relative);
-    fs.stat(filePath, (err, stat) => {
-      if (!err && stat.isFile()) {
-        sendFile(res, filePath);
-        return;
-      }
-      sendFile(res, path.join(PUBLIC_DIR, "index.html"));
-    });
+    sendFile(res, path.join(PUBLIC_DIR, "index.html"));
+    return;
+  }
+  if (STUDIO_BACKEND && !LANDING_ROUTES.has(route)) {
+    proxyToStudio(req, res);
     return;
   }
   send(res, 405, "Method not allowed", { "Content-Type": "text/plain; charset=utf-8" });
@@ -394,5 +477,7 @@ server.on("error", (error) => {
   process.exit(1);
 });
 server.listen(PORT, HOST, () => {
-  console.log(`creatorOS landing on http://${HOST}:${PORT}  studio=${STUDIO_URL}  (checkout paused)`);
+  console.log(
+    `creatorOS landing on http://${HOST}:${PORT}  studio=${STUDIO_URL}  backend=${STUDIO_BACKEND || "off"}`,
+  );
 });
