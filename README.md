@@ -2,13 +2,13 @@
 
 **One video. A month of content.**
 
-creatorOS is an AI content operating system. Upload one podcast, interview, or long-form video and it plans, edits, and schedules a multi-platform campaign - Shorts, Reels, LinkedIn posts, and X - with a 30-day calendar you control.
+creatorOS is an AI content operating system. Upload one podcast, interview, or long-form video, and it plans, edits, and schedules a multi-platform campaign - Shorts, Reels, LinkedIn posts, and X - with a 30-day calendar you control.
 
 Create once. Repurpose everywhere.
 
 ## What it does
 
-1. **Ingest** a YouTube / podcast URL or a local video upload  
+1. **Ingest** a YouTube/podcast URL or a local video upload  
 2. **Find** the moments worth posting (hook, payoff, skip the ramble)  
 3. **Edit** vertical cuts: stitch, speaker-follow 9:16, captions, jump-cuts  
 4. **Write** platform-specific copy (not copy-paste)  
@@ -22,7 +22,7 @@ The calendar is a **plan**. Nothing publishes until you approve it. YouTube uplo
 | --- | --- |
 | App | React + Vite (`frontend/`), served at `/app/` |
 | API | FastAPI (`api/main.py`) |
-| Models | Gemini for strategy / copy / edit direction |
+| Models | Gemini for strategy / copy/edit direction |
 | Media | FFmpeg, OpenCV, Whisper / faster-whisper |
 | Auth | Local accounts by default; optional Supabase + Google |
 
@@ -113,7 +113,7 @@ export PYTHONIOENCODING=utf-8
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-Leave this terminal running. Do **not** use `--reload` for this pipeline - restart the process after Python changes.
+Leave this terminal running. Do **not** use `--reload` for this pipeline; restart the process after Python changes.
 
 ### 6. Open the app
 
@@ -125,7 +125,7 @@ In a browser:
 2. You land on **Accounts** - connect channels or skip.  
 3. Go to **Content**, paste a YouTube/podcast URL or upload a video.  
 4. Set how many posts per platform, then generate.  
-5. Stay on the processing page until the campaign is ready, then review Library and Calendar.
+5. Stay on the processing page until the campaign is ready, then review the Library and Calendar.
 
 Health check: [http://127.0.0.1:8000/health](http://127.0.0.1:8000/health) should return `{"status":"ok"}`.
 
@@ -144,7 +144,7 @@ Then open **http://127.0.0.1:8000/app/** again.
 
 ### Stripe subscriptions (optional paywall)
 
-CreatorOS gates generation by **campaign length** — the same 14 / 30 / 45 / 60-day options as the campaign picker.
+CreatorOS gates generation by **campaign length** - the same 14 / 30 / 45 / 60-day options as the campaign picker.
 
 1. Create four recurring Prices in the [Stripe Dashboard](https://dashboard.stripe.com/) (or one yearly that unlocks all).
 2. Add to the project `.env`:
